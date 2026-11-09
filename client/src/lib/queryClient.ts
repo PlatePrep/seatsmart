@@ -26,7 +26,6 @@ export async function apiRequest(
   const res = await fetch(`${API_BASE}${url}`, {
     method,
     headers: { ...(data ? { "Content-Type": "application/json" } : {}), ...authHeaders() },
-    credentials: "include",
     body: data ? JSON.stringify(data) : undefined,
   });
 
@@ -40,7 +39,7 @@ export const getQueryFn: <T>(options: {
 }) => QueryFunction<T> =
   ({ on401: unauthorizedBehavior }) =>
   async ({ queryKey }) => {
-    const res = await fetch(`${API_BASE}${queryKey.join("/")}`, { headers: authHeaders(), credentials: "include" });
+    const res = await fetch(`${API_BASE}${queryKey.join("/")}`, { headers: authHeaders() });
 
     if (unauthorizedBehavior === "returnNull" && res.status === 401) {
       return null;
