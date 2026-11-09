@@ -14,6 +14,7 @@ const GROUPS: { title: string; fields: [string, string, boolean?][] }[] = [
   { title: "Stripe (card on file)", fields: [["stripeSecretKey", "Secret key", true], ["stripeWebhookSecret", "Webhook signing secret", true]] },
   { title: "Twilio (SMS)", fields: [["twilioSid", "Account SID"], ["twilioToken", "Auth token", true], ["twilioFrom", "From number"]] },
   { title: "Resend (email)", fields: [["resendKey", "API key", true], ["emailFrom", "From address"]] },
+  { title: "Floor-plan reading (OpenAI)", fields: [["openaiKey", "API key", true], ["visionModel", "Vision model"]] },
   { title: "Synthflow (AI calls)", fields: [["synthflowKey", "API key", true], ["synthflowCardAgentId", "Card-reminder agent ID"], ["synthflowAgentId", "Offer-inside agent ID"]] },
 ];
 

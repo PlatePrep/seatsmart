@@ -13,10 +13,11 @@ import {
   createSetupCheckout, getSetupIntent, chargeOffSession, verifyStripeSignature, placeCall,
 } from "./providers";
 import { seedIfEmpty } from "./seed";
+import { detectTables } from "./vision";
 import { toMin } from "@shared/time";
 
 const id = (req: Request, k = "id") => Number(req.params[k]);
-const SECRET_FIELDS = ["synthflowKey", "stripeSecretKey", "stripeWebhookSecret", "twilioToken", "resendKey"] as const;
+const SECRET_FIELDS = ["synthflowKey", "stripeSecretKey", "stripeWebhookSecret", "twilioToken", "resendKey", "openaiKey"] as const;
 
 function maskSettings(s: any) {
   const out: any = { ...s };
@@ -80,6 +81,79 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
   app.patch("/api/locations/:id", (req, res) => res.json(storage.updateLocation(id(req), req.body)));
 
+  // ---------- rooms (floor-plan images) ----------
+  const ensureRooms = (locationId: number) => {
+    let list = storage.listRooms(locationId);
+    if (!list.length) {
+      const r = storage.createRoom({ locationId, name: "Main dining", area: "inside", sortOrder: 0, imageData: "", imageW: 0, imageH: 0 });
+      for (const t of storage.listTables(locationId)) if (!t.roomId) storage.updateTable(t.id, { roomId: r.id });
+      list = [r];
+    }
+    return list;
+  };
+  const roomOut = (r: any, withImage = true) => (withImage ? r : { ...r, imageData: r.imageData ? "yes" : "" });
+  app.get("/api/locations/:id/rooms", (req, res) => res.json(ensureRooms(id(req)).map((r) => roomOut(r))));
+  const roomBody = z.object({
+    name: z.string().min(1).max(60).optional(),
+    area: z.enum(["inside", "patio", "bar", "ballroom"]).optional(),
+    sortOrder: z.coerce.number().int().optional(),
+    imageData: z.string().max(12_000_000).refine((v) => v === "" || /^data:image\/(png|jpeg|webp);base64,/.test(v), "Image must be PNG, JPEG or WebP").optional(),
+    imageW: z.coerce.number().int().min(0).max(10000).optional(),
+    imageH: z.coerce.number().int().min(0).max(10000).optional(),
+  });
+  app.post("/api/locations/:id/rooms", (req, res) => {
+    const b = roomBody.safeParse(req.body);
+    if (!b.success || !b.data.name) return res.status(400).json({ message: "Room name is required" });
+    const n = storage.listRooms(id(req)).length;
+    res.json(storage.createRoom({ locationId: id(req), name: b.data.name, area: b.data.area || "inside", sortOrder: b.data.sortOrder ?? n,
+      imageData: b.data.imageData || "", imageW: b.data.imageW || 0, imageH: b.data.imageH || 0 }));
+  });
+  app.patch("/api/rooms/:id", (req, res) => {
+    const b = roomBody.safeParse(req.body);
+    if (!b.success) return res.status(400).json({ message: b.error.issues[0]?.message || "Invalid room" });
+    if (!storage.getRoom(id(req))) return res.status(404).json({ message: "Room not found" });
+    res.json(storage.updateRoom(id(req), b.data));
+  });
+  app.delete("/api/rooms/:id", (req, res) => {
+    const r = storage.getRoom(id(req));
+    if (!r) return res.status(404).json({ message: "Room not found" });
+    if (storage.listRooms(r.locationId).length <= 1) return res.status(400).json({ message: "A location needs at least one room" });
+    storage.deleteRoom(r.id);
+    res.json({ ok: true });
+  });
+  // Read tables from the uploaded image with a vision model (needs an OpenAI key in Settings).
+  app.post("/api/rooms/:id/detect", async (req, res) => {
+    const r = storage.getRoom(id(req));
+    if (!r) return res.status(404).json({ message: "Room not found" });
+    if (!r.imageData) return res.status(400).json({ message: "Upload a floor-plan image for this room first." });
+    const s = storage.getSettings(r.locationId);
+    if (!s.openaiKey) return res.status(400).json({ message: "Add an OpenAI API key in Settings → Floor-plan reading to auto-detect tables. You can still place tables by hand on top of the image." });
+    try {
+      res.json({ tables: await detectTables(r.imageData, s.openaiKey, s.visionModel || "gpt-4o", r.area) });
+    } catch (e: any) {
+      res.status(502).json({ message: e?.message || "Couldn't read the image" });
+    }
+  });
+  // Bulk add (optionally replacing) the tables in a room — used after detection.
+  app.post("/api/rooms/:id/tables", (req, res) => {
+    const r = storage.getRoom(id(req));
+    if (!r) return res.status(404).json({ message: "Room not found" });
+    const T = z.object({
+      label: z.string().min(1).max(20), capacity: z.coerce.number().int().min(1).max(40),
+      area: z.enum(["inside", "patio", "bar", "ballroom"]).default(r.area as any),
+      shape: z.enum(["square", "round", "rect"]).default("square"),
+      x: z.coerce.number().min(0).max(100), y: z.coerce.number().min(0).max(100),
+      w: z.coerce.number().min(0).max(100).default(0), h: z.coerce.number().min(0).max(100).default(0),
+      mergeGroup: z.string().default(""), mergeOrder: z.coerce.number().int().default(0),
+    });
+    const b = z.object({ replace: z.boolean().default(false), tables: z.array(T).max(300) }).safeParse(req.body);
+    if (!b.success) return res.status(400).json({ message: b.error.issues[0]?.message || "Invalid tables" });
+    if (b.data.replace) for (const t of storage.listTables(r.locationId)) if (t.roomId === r.id) storage.deleteTable(t.id);
+    const out = b.data.tables.map((t) => storage.createTable({ ...t, locationId: r.locationId, roomId: r.id, active: true,
+      x: Math.round(t.x), y: Math.round(t.y), w: Math.round(t.w), h: Math.round(t.h) }));
+    res.json(out);
+  });
+
   // ---------- tables ----------
   app.get("/api/locations/:id/tables", (req, res) => res.json(storage.listTables(id(req))));
   app.post("/api/locations/:id/tables/add", (req, res) => {
@@ -88,15 +162,18 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       area: z.enum(["inside", "patio", "bar", "ballroom"]).default("inside"),
       shape: z.enum(["square", "round", "rect"]).default("square"),
       mergeGroup: z.string().default(""), mergeOrder: z.coerce.number().int().default(0),
+      roomId: z.coerce.number().int().default(0),
     }).safeParse(req.body);
     if (!b.success) return res.status(400).json({ message: b.error.message });
-    res.json(storage.createTable({ locationId: id(req), x: 45, y: 45, active: true, ...b.data }));
+    const roomId = b.data.roomId || ensureRooms(id(req))[0].id;
+    res.json(storage.createTable({ locationId: id(req), x: 45, y: 45, w: 0, h: 0, active: true, ...b.data, roomId }));
   });
   app.patch("/api/tables/:id", (req, res) => {
-    const allowed = ["label", "capacity", "area", "shape", "x", "y", "mergeGroup", "mergeOrder", "active"];
+    const allowed = ["label", "capacity", "area", "shape", "x", "y", "w", "h", "roomId", "mergeGroup", "mergeOrder", "active"];
     const data = Object.fromEntries(Object.entries(req.body || {}).filter(([k]) => allowed.includes(k)));
-    if ("x" in data) data.x = Math.max(0, Math.min(94, Math.round(Number(data.x))));
-    if ("y" in data) data.y = Math.max(0, Math.min(92, Math.round(Number(data.y))));
+    if ("x" in data) data.x = Math.max(0, Math.min(98, Math.round(Number(data.x))));
+    if ("y" in data) data.y = Math.max(0, Math.min(98, Math.round(Number(data.y))));
+    for (const k of ["w", "h"]) if (k in data) data[k] = Math.max(0, Math.min(100, Math.round(Number(data[k]))));
     res.json(storage.updateTable(id(req), data as any));
   });
   app.delete("/api/tables/:id", (req, res) => { storage.deleteTable(id(req)); res.json({ ok: true }); });

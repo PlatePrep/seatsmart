@@ -24,6 +24,22 @@ export const diningTables = sqliteTable("dining_tables", {
   mergeGroup: text("merge_group").notNull().default(""),
   mergeOrder: integer("merge_order").notNull().default(0),
   active: integer("active", { mode: "boolean" }).notNull().default(true),
+  roomId: integer("room_id").notNull().default(0),
+  // size on the room canvas, % of width / height (0 = auto)
+  w: integer("w").notNull().default(0),
+  h: integer("h").notNull().default(0),
+});
+
+// A room (dining room, patio, ballroom...) with an optional uploaded floor-plan image.
+export const rooms = sqliteTable("rooms", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  locationId: integer("location_id").notNull(),
+  name: text("name").notNull(),
+  area: text("area").notNull().default("inside"), // default area for new tables
+  sortOrder: integer("sort_order").notNull().default(0),
+  imageData: text("image_data").notNull().default(""), // data URL
+  imageW: integer("image_w").notNull().default(0),
+  imageH: integer("image_h").notNull().default(0),
 });
 
 // status: booked | confirmed | seated | completed | cancelled | no_show
@@ -92,6 +108,8 @@ export const settings = sqliteTable("settings", {
   resendKey: text("resend_key").notNull().default(""),
   emailFrom: text("email_from").notNull().default(""),
   publicBaseUrl: text("public_base_url").notNull().default(""),
+  openaiKey: text("openai_key").notNull().default(""),
+  visionModel: text("vision_model").notNull().default("gpt-4o"),
 });
 
 // Patio "offer inside" calls (v2 feature)
@@ -131,6 +149,7 @@ export const outreachEvents = sqliteTable("outreach_events", {
 });
 
 export const insertLocationSchema = createInsertSchema(locations).omit({ id: true });
+export const insertRoomSchema = createInsertSchema(rooms).omit({ id: true });
 export const insertTableSchema = createInsertSchema(diningTables).omit({ id: true });
 export const insertReservationSchema = createInsertSchema(reservations).omit({ id: true });
 export const reservationInputSchema = z.object({
@@ -149,6 +168,8 @@ export const reservationInputSchema = z.object({
 
 export type Location = typeof locations.$inferSelect;
 export type InsertLocation = z.infer<typeof insertLocationSchema>;
+export type Room = typeof rooms.$inferSelect;
+export type InsertRoom = z.infer<typeof insertRoomSchema>;
 export type DiningTable = typeof diningTables.$inferSelect;
 export type InsertDiningTable = z.infer<typeof insertTableSchema>;
 export type Reservation = typeof reservations.$inferSelect;

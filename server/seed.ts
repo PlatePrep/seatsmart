@@ -1,32 +1,16 @@
 import { storage } from "./storage";
+import { applyAmiLayout } from "./ami-layout";
 import { syncCampaign, markCardOnFile } from "./outreach";
 import { localToday, addDays } from "@shared/time";
 
-const T = (label: string, capacity: number, area: string, x: number, y: number, mergeGroup = "", mergeOrder = 0, shape = "square") =>
-  ({ label, capacity, area, x, y, mergeGroup, mergeOrder, shape, active: true });
-
 export async function seedIfEmpty() {
   if (storage.listLocations().length) return;
-  const loc = storage.createLocation({ name: "Bradenton", city: "Bradenton", state: "FL", phone: "(941) 555-0142" });
+  const loc = storage.createLocation({ name: "Anna Maria", city: "Anna Maria", state: "FL", phone: "(941) 555-0142" });
   storage.updateSettings(loc.id, { restaurantName: "The Chateau" });
   storage.createLocation({ name: "Bolton Landing", city: "Bolton Landing", state: "NY", phone: "" });
 
-  const tables = [
-    ...[0, 1, 2, 3, 4, 5].map((i) => T(`T${i}`, 2, "inside", 6 + i * 9, 10, "row2", i)),
-    T("T6", 8, "inside", 74, 9, "", 0, "round"),
-    T("T7", 4, "inside", 6, 32),
-    T("T8", 4, "inside", 20, 32, "pair89", 0),
-    T("T9", 4, "inside", 32, 32, "pair89", 1),
-    T("T10", 8, "inside", 50, 33, "", 0, "rect"),
-    T("T11", 4, "inside", 74, 33),
-    T("T12", 4, "inside", 6, 53, "pair1213", 0),
-    T("T13", 4, "inside", 18, 53, "pair1213", 1),
-    T("T14", 6, "inside", 38, 54, "pair1415", 0, "rect"),
-    T("T15", 6, "inside", 54, 54, "pair1415", 1, "rect"),
-    T("BAR", 10, "bar", 76, 54, "", 0, "rect"),
-    ...[1, 2, 3, 4, 5, 6].map((i) => T(`PATIO${i}`, 4, "patio", 4 + (i - 1) * 13, 80, "patio", i)),
-  ];
-  for (const t of tables) storage.createTable({ locationId: loc.id, ...t });
+  applyAmiLayout(loc.id);
+
 
   const today = localToday();
   const booked = (daysAgo: number) => new Date(Date.now() - daysAgo * 86400000).toISOString();

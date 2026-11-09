@@ -1,11 +1,11 @@
 # SeatSmart
 
-Host-stand seating and big-party confirmations for The Chateau (Bradenton, FL and Bolton Landing, NY).
+Host-stand seating and big-party confirmations for The Chateau (Anna Maria, FL and Bolton Landing, NY).
 
 ## What it does
 
 - **Seating plan.** Everyone sits inside when there is room; the patio is the fallback. Inside goes first to repeat guests (2+ visits), then to the latest bookings. Turn times: 1–2 guests 75 min, 3–6 guests 105 min, 7+ guests 120 min. Adjacent 2-tops and 4-tops in a merge group combine as needed. Each plan is shown twice: standard turns and with a +20 min cushion. Birthday rows are gold and patio rows are pink. Print-ready.
-- **Floor plan.** Drag-and-drop tables. You can add, edit and delete tables and set merge groups and their order.
+- **Floor plan.** Each location has rooms (e.g. Main dining, Patio, Ballroom). Upload a screenshot, photo or PDF of each room; it becomes the background you place tables on. **Read tables** uses an OpenAI vision model (key in Settings → Floor-plan reading) to pull table numbers, seats and positions from the image for review. Drag-and-drop tables. You can add, edit and delete tables and set merge groups and their order.
 - **Tonight dashboard.** Shows covers, repeat guests, the next seatings, big parties at risk, and which tables can safely take a walk-in.
 - **Reservations.** Day view, add/edit/cancel, and OpenTable CSV import (Date, Time, Guest, Party size, Phone, Email, Visits, Notes).
 - **Big-party confirmations (parties of 10+).** Card on file through Stripe Checkout in setup mode (no pre-auth). The no-show fee is $25 per seat by default and can be changed.

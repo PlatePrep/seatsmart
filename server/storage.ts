@@ -2,7 +2,7 @@ import { drizzle } from "drizzle-orm/better-sqlite3";
 import Database from "better-sqlite3";
 import { and, eq, inArray, lte, asc, desc } from "drizzle-orm";
 import {
-  locations, diningTables, reservations, rules, settings, calls, campaignSteps, outreachEvents,
+  locations, diningTables, rooms, type Room, type InsertRoom, reservations, rules, settings, calls, campaignSteps, outreachEvents,
   type Location, type InsertLocation, type DiningTable, type InsertDiningTable,
   type Reservation, type InsertReservation, type Rules, type Settings, type Call,
   type CampaignStep, type OutreachEvent,
@@ -55,10 +55,24 @@ CREATE TABLE IF NOT EXISTS campaign_steps (
 CREATE TABLE IF NOT EXISTS outreach_events (
   id INTEGER PRIMARY KEY AUTOINCREMENT, reservation_id INTEGER NOT NULL, type TEXT NOT NULL,
   channel TEXT NOT NULL DEFAULT '', body TEXT NOT NULL DEFAULT '', at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS rooms (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, location_id INTEGER NOT NULL, name TEXT NOT NULL,
+  area TEXT NOT NULL DEFAULT 'inside', sort_order INTEGER NOT NULL DEFAULT 0,
+  image_data TEXT NOT NULL DEFAULT '', image_w INTEGER NOT NULL DEFAULT 0, image_h INTEGER NOT NULL DEFAULT 0);
 CREATE INDEX IF NOT EXISTS idx_res_loc_date ON reservations(location_id, date);
 CREATE INDEX IF NOT EXISTS idx_steps_due ON campaign_steps(status, send_at);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_res_token ON reservations(outreach_token) WHERE outreach_token <> '';
 `);
+
+function addColumn(table: string, col: string, ddl: string) {
+  const cols = sqlite.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+  if (!cols.some((c) => c.name === col)) sqlite.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${ddl}`);
+}
+addColumn("dining_tables", "room_id", "INTEGER NOT NULL DEFAULT 0");
+addColumn("dining_tables", "w", "INTEGER NOT NULL DEFAULT 0");
+addColumn("dining_tables", "h", "INTEGER NOT NULL DEFAULT 0");
+addColumn("settings", "openai_key", "TEXT NOT NULL DEFAULT ''");
+addColumn("settings", "vision_model", "TEXT NOT NULL DEFAULT 'gpt-4o'");
 
 export const db = drizzle(sqlite);
 export const rawDb = sqlite;
@@ -75,6 +89,17 @@ export const storage = {
   },
   updateLocation: (id: number, data: Partial<InsertLocation>) =>
     db.update(locations).set(data).where(eq(locations.id, id)).returning().get(),
+
+  // rooms
+  listRooms: (locationId: number): Room[] =>
+    db.select().from(rooms).where(eq(rooms.locationId, locationId)).orderBy(asc(rooms.sortOrder), asc(rooms.id)).all(),
+  getRoom: (id: number) => db.select().from(rooms).where(eq(rooms.id, id)).get(),
+  createRoom: (data: InsertRoom): Room => db.insert(rooms).values(data).returning().get(),
+  updateRoom: (id: number, data: Partial<InsertRoom>) => db.update(rooms).set(data).where(eq(rooms.id, id)).returning().get(),
+  deleteRoom: (id: number) => {
+    db.delete(diningTables).where(eq(diningTables.roomId, id)).run();
+    return db.delete(rooms).where(eq(rooms.id, id)).run();
+  },
 
   // tables
   listTables: (locationId: number): DiningTable[] =>
