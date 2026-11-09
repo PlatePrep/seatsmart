@@ -5,6 +5,7 @@ import { useApp } from "@/lib/app-context";
 import { errMsg, getJson, invalidateLocation, send } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import { PageHeader, Pill, Empty } from "@/components/common";
+import { BlocksManager } from "@/components/blocks-manager";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
@@ -12,12 +13,14 @@ import { ChevronLeft, ChevronRight, Printer, PhoneCall, RefreshCw } from "lucide
 
 function PlanTable({ title, plan, byId, onOffer, testId }: { title: string; plan: SeatingPlan; byId: Map<number, Reservation>; onOffer: (id: number) => void; testId: string }) {
   const patio = plan.assignments.filter((a) => a.area === "patio").length;
+  const ballroom = plan.assignments.filter((a) => a.area === "ballroom").length;
   return (
     <section className="min-w-0 rounded-lg border bg-card" data-testid={testId}>
       <div className="flex flex-wrap items-center justify-between gap-2 border-b px-4 py-2.5">
         <h2 className="text-sm font-semibold">{title}</h2>
         <div className="flex gap-1.5">
-          <Pill t="teal">{plan.assignments.length - patio} inside</Pill>
+          <Pill t="teal">{plan.assignments.length - patio - ballroom} inside</Pill>
+          {ballroom > 0 && <Pill t="gray">{ballroom} ballroom</Pill>}
           <Pill t="amber">{patio} patio</Pill>
           {plan.unseated.length > 0 && <Pill t="red">{plan.unseated.length} unseated</Pill>}
         </div>
@@ -52,7 +55,7 @@ function PlanTable({ title, plan, byId, onOffer, testId }: { title: string; plan
       {plan.unseated.length > 0 && (
         <div className="border-t px-4 py-3 text-sm">
           <div className="mb-1 font-medium text-destructive">Couldn't seat</div>
-          {plan.unseated.map((u) => <div key={u.reservationId}>{byId.get(u.reservationId)?.guestName}: {u.reason}</div>)}
+          {plan.unseated.map((u) => <div key={u.reservationId} className="mb-1"><span className="font-medium">{byId.get(u.reservationId)?.guestName} ({byId.get(u.reservationId)?.partySize})</span>: {u.reason}{u.suggestion && <div className="text-xs text-muted-foreground">Fix: {u.suggestion}</div>}</div>)}
         </div>
       )}
     </section>
@@ -104,6 +107,7 @@ export default function Plan() {
           <PlanTable title={`With +${data.cushion.cushion} min cushion`} plan={data.cushion} byId={byId} onOffer={(id) => offer.mutate(id)} testId="cushion" />
         </div>
       )}
+      {locationId && <div className="mt-5 print:hidden"><BlocksManager locationId={locationId} date={date} /></div>}
     </div>
   );
 }

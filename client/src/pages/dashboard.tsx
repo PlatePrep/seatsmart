@@ -96,7 +96,7 @@ export default function Dashboard() {
               fits.length === 0 ? <span className="text-sm text-muted-foreground">Nothing free long enough. Offer the bar or a wait.</span> :
               fits.slice(0, 8).map((w) => (
                 <Pill key={w.tableId} t={w.area === "patio" ? "amber" : "green"}>
-                  {w.label} · {w.capacity} seats · {w.freeFor >= 600 ? "rest of night" : `${Math.floor(w.freeFor / 60)}h ${w.freeFor % 60}m`}
+                  {w.label}{w.walkInOnly ? " (held for walk-ins)" : ""} · {w.capacity} seats · {w.freeFor >= 600 ? "rest of night" : `${Math.floor(w.freeFor / 60)}h ${w.freeFor % 60}m`}
                 </Pill>
               ))}
           </div>

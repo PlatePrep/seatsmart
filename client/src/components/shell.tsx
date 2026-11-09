@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { Link, useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
-import { LogOut, LayoutDashboard, CalendarDays, Armchair, Map, ShieldCheck, PhoneCall, SlidersHorizontal, Settings, Building2 } from "lucide-react";
+import { LogOut, LayoutDashboard, CalendarDays, Armchair, Map, ShieldCheck, PhoneCall, SlidersHorizontal, Settings, Building2, TrendingUp } from "lucide-react";
 import { useApp } from "@/lib/app-context";
 import { useAuth } from "@/components/auth-gate";
 import { cn } from "@/lib/utils";
@@ -11,6 +11,7 @@ const NAV = [
   { href: "/", label: "Tonight", icon: LayoutDashboard },
   { href: "/reservations", label: "Reservations", icon: CalendarDays },
   { href: "/plan", label: "Seating plan", icon: Armchair },
+  { href: "/pacing", label: "Pacing & openings", icon: TrendingUp },
   { href: "/floor-plan", label: "Floor plan", icon: Map },
   { href: "/confirmations", label: "Big parties", icon: ShieldCheck, badge: true },
   { href: "/calls", label: "AI calls", icon: PhoneCall },

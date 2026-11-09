@@ -2,7 +2,7 @@ import { drizzle } from "drizzle-orm/better-sqlite3";
 import Database from "better-sqlite3";
 import { and, eq, inArray, lte, asc, desc } from "drizzle-orm";
 import {
-  locations, diningTables, rooms, type Room, type InsertRoom, reservations, rules, settings, calls, campaignSteps, outreachEvents,
+  locations, diningTables, rooms, blocks, type Block, type Room, type InsertRoom, reservations, rules, settings, calls, campaignSteps, outreachEvents,
   type Location, type InsertLocation, type DiningTable, type InsertDiningTable,
   type Reservation, type InsertReservation, type Rules, type Settings, type Call,
   type CampaignStep, type OutreachEvent,
@@ -59,6 +59,10 @@ CREATE TABLE IF NOT EXISTS rooms (
   id INTEGER PRIMARY KEY AUTOINCREMENT, location_id INTEGER NOT NULL, name TEXT NOT NULL,
   area TEXT NOT NULL DEFAULT 'inside', sort_order INTEGER NOT NULL DEFAULT 0,
   image_data TEXT NOT NULL DEFAULT '', image_w INTEGER NOT NULL DEFAULT 0, image_h INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS blocks (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, location_id INTEGER NOT NULL, date TEXT NOT NULL,
+  room_id INTEGER NOT NULL DEFAULT 0, table_id INTEGER NOT NULL DEFAULT 0, start_time TEXT NOT NULL DEFAULT '',
+  end_time TEXT NOT NULL DEFAULT '', kind TEXT NOT NULL DEFAULT 'walkin', note TEXT NOT NULL DEFAULT '');
 CREATE INDEX IF NOT EXISTS idx_res_loc_date ON reservations(location_id, date);
 CREATE INDEX IF NOT EXISTS idx_steps_due ON campaign_steps(status, send_at);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_res_token ON reservations(outreach_token) WHERE outreach_token <> '';
@@ -71,6 +75,12 @@ function addColumn(table: string, col: string, ddl: string) {
 addColumn("dining_tables", "room_id", "INTEGER NOT NULL DEFAULT 0");
 addColumn("dining_tables", "w", "INTEGER NOT NULL DEFAULT 0");
 addColumn("dining_tables", "h", "INTEGER NOT NULL DEFAULT 0");
+addColumn("rules", "pacing_covers", "INTEGER NOT NULL DEFAULT 30");
+addColumn("rules", "avg_spend_cents", "INTEGER NOT NULL DEFAULT 7500");
+addColumn("rules", "reset_min", "INTEGER NOT NULL DEFAULT 10");
+addColumn("rules", "use_ballroom", "INTEGER NOT NULL DEFAULT 1");
+addColumn("rules", "service_start", "TEXT NOT NULL DEFAULT ''");
+addColumn("rules", "last_seating", "TEXT NOT NULL DEFAULT ''");
 addColumn("settings", "openai_key", "TEXT NOT NULL DEFAULT ''");
 addColumn("settings", "vision_model", "TEXT NOT NULL DEFAULT 'gpt-4o'");
 
@@ -100,6 +110,13 @@ export const storage = {
     db.delete(diningTables).where(eq(diningTables.roomId, id)).run();
     return db.delete(rooms).where(eq(rooms.id, id)).run();
   },
+
+  // blocks
+  listBlocks: (locationId: number, date: string): Block[] =>
+    db.select().from(blocks).where(and(eq(blocks.locationId, locationId), eq(blocks.date, date))).orderBy(asc(blocks.id)).all(),
+  getBlock: (id: number) => db.select().from(blocks).where(eq(blocks.id, id)).get(),
+  createBlock: (data: Omit<Block, "id">) => db.insert(blocks).values(data).returning().get(),
+  deleteBlock: (id: number) => db.delete(blocks).where(eq(blocks.id, id)).run(),
 
   // tables
   listTables: (locationId: number): DiningTable[] =>

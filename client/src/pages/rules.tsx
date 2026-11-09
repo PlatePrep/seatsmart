@@ -7,6 +7,7 @@ import { PageHeader, Section, CHANNEL_LABEL } from "@/components/common";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Plus, Trash2 } from "lucide-react";
 
@@ -55,6 +56,21 @@ export default function Rules() {
               </SelectContent>
             </Select></div>
           <p className="mt-3 text-xs text-muted-foreground">Everyone sits inside when there's room. Patio is the fallback. 2-tops and 4-tops in a merge group combine when needed.</p>
+        </Section>
+        <Section title="Pacing & openings">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+            <Num id="pace-covers" label="Pace cap" value={f.pacingCovers} onChange={set("pacingCovers")} suffix="covers / 15 min" />
+            <Num id="avg-spend" label="Avg spend" value={f.avgSpendCents / 100} onChange={(n) => set("avgSpendCents")(Math.round(n * 100))} suffix="$ / guest" />
+            <Num id="reset-min" label="Table reset" value={f.resetMin} onChange={set("resetMin")} suffix="min" />
+          </div>
+          <div className="mt-4 grid grid-cols-2 gap-3">
+            <div><Label htmlFor="service-start">Service start</Label><Input id="service-start" type="time" value={f.serviceStart || ""} onChange={(e) => set("serviceStart")(e.target.value)} className="mt-1 w-36" data-testid="input-service-start" /></div>
+            <div><Label htmlFor="last-seating">Last seating</Label><Input id="last-seating" type="time" value={f.lastSeating || ""} onChange={(e) => set("lastSeating")(e.target.value)} className="mt-1 w-36" data-testid="input-last-seating" /></div>
+          </div>
+          <label className="mt-4 flex items-center gap-2 text-sm" data-testid="toggle-ballroom">
+            <Switch checked={!!f.useBallroom} onCheckedChange={set("useBallroom")} />Use ballroom as overflow (after inside, before patio)
+          </label>
+          <p className="mt-3 text-xs text-muted-foreground">Blank start/last seating = use first and last booking. Openings never break the pace cap or blocked tables.</p>
         </Section>
         <Section title="Big parties">
           <div className="grid grid-cols-2 gap-3">

@@ -5,6 +5,7 @@ import { storage } from "./storage";
 import { reservationInputSchema, insertLocationSchema } from "@shared/schema";
 import { localToUtc, localToday } from "@shared/time";
 import { generatePlan, walkInAvailability } from "./seating";
+import { analyzePacing } from "./pacing";
 import {
   syncCampaign, startScheduler, resendNow, markCardOnFile, handleReply, riskLevel,
   setClientOrigin, portalLink, messageFor, voiceScript, isActive,
@@ -270,21 +271,58 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     res.json({ ok: checks.every((c) => c.endsWith("OK")) && checks.length > 0, message: checks.length ? checks.join(" · ") : "No keys saved yet." });
   });
 
+  // ---------- pacing + openings ----------
+  app.get("/api/locations/:id/pacing", (req, res) => {
+    const date = String(req.query.date || localToday());
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ message: "Bad date" });
+    const L = id(req);
+    ensureRooms(L);
+    res.json(analyzePacing(date, storage.listTables(L), storage.listRooms(L), storage.listReservations(L, date), storage.getRules(L), storage.listBlocks(L, date)));
+  });
+  // dates with bookings, for quick navigation
+  app.get("/api/locations/:id/booked-dates", (req, res) => {
+    const m = new Map<string, { parties: number; covers: number }>();
+    for (const x of storage.listReservations(id(req))) {
+      if (["cancelled", "no_show"].includes(x.status)) continue;
+      const v = m.get(x.date) || { parties: 0, covers: 0 };
+      v.parties++; v.covers += x.partySize; m.set(x.date, v);
+    }
+    res.json(Array.from(m.entries()).map(([date, v]) => ({ date, ...v })).sort((a, b) => a.date.localeCompare(b.date)));
+  });
+
+  // ---------- blocks (hold tables/rooms for walk-ins or close them) ----------
+  app.get("/api/locations/:id/blocks", (req, res) => res.json(storage.listBlocks(id(req), String(req.query.date || localToday()))));
+  app.post("/api/locations/:id/blocks", (req, res) => {
+    const hhmm = z.string().regex(/^(\d{2}:\d{2})?$/);
+    const b = z.object({
+      date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), roomId: z.coerce.number().int().default(0), tableId: z.coerce.number().int().default(0),
+      startTime: hhmm.default(""), endTime: hhmm.default(""), kind: z.enum(["walkin", "closed"]).default("walkin"), note: z.string().max(120).default(""),
+    }).safeParse(req.body);
+    if (!b.success) return res.status(400).json({ message: b.error.issues[0]?.message || "Invalid block" });
+    if (!b.data.roomId && !b.data.tableId) return res.status(400).json({ message: "Pick a room or a table" });
+    if (b.data.startTime && b.data.endTime && b.data.endTime <= b.data.startTime) return res.status(400).json({ message: "End time must be after start time" });
+    res.json(storage.createBlock({ locationId: id(req), ...b.data }));
+  });
+  app.delete("/api/blocks/:id", (req, res) => { storage.deleteBlock(id(req)); res.json({ ok: true }); });
+
   // ---------- seating ----------
   app.post("/api/locations/:id/plan/generate", (req, res) => {
     const date = String(req.body?.date || localToday());
     const tables = storage.listTables(id(req));
     const list = storage.listReservations(id(req), date);
     const rules = storage.getRules(id(req));
-    res.json({ standard: generatePlan(date, tables, list, rules, 0), cushion: generatePlan(date, tables, list, rules, rules.cushionMin) });
+    const bl = storage.listBlocks(id(req), date);
+    res.json({ standard: generatePlan(date, tables, list, rules, 0, bl), cushion: generatePlan(date, tables, list, rules, rules.cushionMin, bl) });
   });
   app.get("/api/locations/:id/walk-in-availability", (req, res) => {
     const date = String(req.query.date || localToday());
     const at = toMin(String(req.query.at || "19:00"));
     const windowMin = Number(req.query.windowMin || 120);
     const tables = storage.listTables(id(req));
-    const plan = generatePlan(date, tables, storage.listReservations(id(req), date), storage.getRules(id(req)), 0);
-    res.json(walkInAvailability(tables, plan, at, windowMin));
+    const rules = storage.getRules(id(req));
+    const bl = storage.listBlocks(id(req), date);
+    const plan = generatePlan(date, tables, storage.listReservations(id(req), date), rules, 0, bl);
+    res.json(walkInAvailability(tables, plan, at, windowMin, rules, bl));
   });
 
   // ---------- patio offer-inside calls ----------

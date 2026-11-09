@@ -19,4 +19,4 @@ export function invalidateLocation(id: number | null) {
   queryClient.invalidateQueries({ queryKey: ["/api/locations"] });
   if (id) queryClient.invalidateQueries({ queryKey: ["/api/locations", id] });
 }
-export const money = (cents: number) => `$${(cents / 100).toFixed(cents % 100 ? 2 : 0)}`;
+export const money = (cents: number) => `$${(cents / 100).toLocaleString("en-US", { minimumFractionDigits: cents % 100 ? 2 : 0, maximumFractionDigits: 2 })}`;

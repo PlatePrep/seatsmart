@@ -81,6 +81,13 @@ export const rules = sqliteTable("rules", {
   // big-party confirmation defaults
   cardThreshold: integer("card_threshold").notNull().default(10),
   noShowFeeCents: integer("no_show_fee_cents").notNull().default(2500),
+  // pacing + revenue
+  pacingCovers: integer("pacing_covers").notNull().default(30), // max covers arriving per 15 min
+  avgSpendCents: integer("avg_spend_cents").notNull().default(7500), // per guest
+  resetMin: integer("reset_min").notNull().default(10), // table reset between seatings
+  useBallroom: integer("use_ballroom", { mode: "boolean" }).notNull().default(true), // overflow after inside
+  serviceStart: text("service_start").notNull().default(""), // "" = first booking
+  lastSeating: text("last_seating").notNull().default(""), // "" = last booking
   cadence: text("cadence").notNull().default(
     JSON.stringify([
       { offsetHours: 72, channel: "sms_email" },
@@ -110,6 +117,19 @@ export const settings = sqliteTable("settings", {
   publicBaseUrl: text("public_base_url").notNull().default(""),
   openaiKey: text("openai_key").notNull().default(""),
   visionModel: text("vision_model").notNull().default("gpt-4o"),
+});
+
+// Per-date blocks on a table or a whole room. kind: walkin (held for walk-ins) | closed
+export const blocks = sqliteTable("blocks", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  locationId: integer("location_id").notNull(),
+  date: text("date").notNull(), // YYYY-MM-DD
+  roomId: integer("room_id").notNull().default(0),
+  tableId: integer("table_id").notNull().default(0),
+  startTime: text("start_time").notNull().default(""), // "" = all day
+  endTime: text("end_time").notNull().default(""),
+  kind: text("kind").notNull().default("walkin"),
+  note: text("note").notNull().default(""),
 });
 
 // Patio "offer inside" calls (v2 feature)
@@ -169,6 +189,7 @@ export const reservationInputSchema = z.object({
 export type Location = typeof locations.$inferSelect;
 export type InsertLocation = z.infer<typeof insertLocationSchema>;
 export type Room = typeof rooms.$inferSelect;
+export type Block = typeof blocks.$inferSelect;
 export type InsertRoom = z.infer<typeof insertRoomSchema>;
 export type DiningTable = typeof diningTables.$inferSelect;
 export type InsertDiningTable = z.infer<typeof insertTableSchema>;
@@ -196,5 +217,5 @@ export type SeatingPlan = {
   date: string;
   cushion: number;
   assignments: SeatAssignment[];
-  unseated: { reservationId: number; reason: string }[];
+  unseated: { reservationId: number; reason: string; suggestion?: string; holdTableIds?: number[]; startMin?: number; endMin?: number }[];
 };

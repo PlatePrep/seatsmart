@@ -10,6 +10,7 @@ import { Shell } from "@/components/shell";
 import Dashboard from "@/pages/dashboard";
 import Reservations from "@/pages/reservations";
 import Plan from "@/pages/plan";
+import PacingPage from "@/pages/pacing";
 import FloorPlan from "@/pages/floor";
 import Confirmations from "@/pages/confirmations";
 import Calls from "@/pages/calls";
@@ -28,6 +29,7 @@ function HostApp() {
           <Route path="/" component={Dashboard} />
           <Route path="/reservations" component={Reservations} />
           <Route path="/plan" component={Plan} />
+          <Route path="/pacing" component={PacingPage} />
           <Route path="/floor-plan" component={FloorPlan} />
           <Route path="/confirmations" component={Confirmations} />
           <Route path="/calls" component={Calls} />
