@@ -17,9 +17,11 @@ import Rules from "@/pages/rules";
 import SettingsPage from "@/pages/settings";
 import Locations from "@/pages/locations";
 import Portal from "@/pages/portal";
+import { AuthGate } from "@/components/auth-gate";
 
 function HostApp() {
   return (
+    <AuthGate>
     <AppProvider>
       <Shell>
         <Switch>
@@ -36,6 +38,7 @@ function HostApp() {
         </Switch>
       </Shell>
     </AppProvider>
+    </AuthGate>
   );
 }
 

@@ -26,6 +26,15 @@ npm run build && npm start
 
 Data is stored in SQLite (`data.db`, or set `SEATSMART_DB=/path/file.db`). It seeds demo data when empty. Delete the file to reset.
 
+## Staff password
+
+The host app sits behind one shared staff password. Guest card pages (`/#/r/{token}`) and webhooks stay open.
+
+- Set `APP_PASSWORD` before the first start. If it isn't set, the server generates a password and prints it to the console once.
+- You can change the password in **Settings → Staff password**. Changing it signs out every device.
+- Locked out? Restart with `APP_PASSWORD=new-password APP_PASSWORD_RESET=1`.
+- The password is stored as a salted scrypt hash. Sessions last 14 days, and after 5 wrong tries login locks for a minute.
+
 ## Demo mode vs live
 
 Demo mode is **on** by default. Texts, emails, calls and charges are simulated and logged, and the guest page shows a demo card form (use `4242 4242 4242 4242`, any future MM/YY). Only the brand and last 4 digits are stored.

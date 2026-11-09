@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useApp } from "@/lib/app-context";
 import { errMsg, invalidateLocation, send } from "@/lib/api";
+import { setAuthToken } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { PageHeader, Section, Pill } from "@/components/common";
 import { Button } from "@/components/ui/button";
@@ -31,6 +32,12 @@ export default function SettingsPage() {
     mutationFn: () => send("POST", `/api/locations/${locationId}/settings/test`),
     onSuccess: (x: any) => toast({ title: x.ok ? "Connections OK" : "Check connections", description: x.message, variant: x.ok ? undefined : "destructive" }),
     onError: (e) => toast({ title: "Test failed", description: errMsg(e), variant: "destructive" }),
+  });
+  const [pw, setPw] = useState({ current: "", next: "", confirm: "" });
+  const changePw = useMutation({
+    mutationFn: () => send<{ token: string }>("POST", "/api/auth/password", { current: pw.current, next: pw.next }),
+    onSuccess: (x) => { setAuthToken(x.token); setPw({ current: "", next: "", confirm: "" }); toast({ title: "Password changed", description: "Other devices are signed out." }); },
+    onError: (e) => toast({ title: "Couldn't change password", description: errMsg(e), variant: "destructive" }),
   });
   if (!f) return <div className="h-60 animate-pulse rounded-lg bg-muted" />;
   const base = (f.publicBaseUrl || window.location.origin).replace(/\/$/, "");
@@ -73,6 +80,15 @@ export default function SettingsPage() {
             </Section>
           ))}
         </div>
+        <Section title="Staff password">
+          <form className="grid gap-3 md:grid-cols-4 md:items-end" onSubmit={(e) => { e.preventDefault(); changePw.mutate(); }}>
+            <div><Label htmlFor="pw-cur">Current</Label><Input id="pw-cur" type="password" autoComplete="current-password" value={pw.current} onChange={(e) => setPw({ ...pw, current: e.target.value })} className="mt-1" data-testid="input-pw-current" /></div>
+            <div><Label htmlFor="pw-new">New (8+ characters)</Label><Input id="pw-new" type="password" autoComplete="new-password" value={pw.next} onChange={(e) => setPw({ ...pw, next: e.target.value })} className="mt-1" data-testid="input-pw-new" /></div>
+            <div><Label htmlFor="pw-conf">Confirm new</Label><Input id="pw-conf" type="password" autoComplete="new-password" value={pw.confirm} onChange={(e) => setPw({ ...pw, confirm: e.target.value })} className="mt-1" data-testid="input-pw-confirm" /></div>
+            <Button type="submit" disabled={!pw.current || pw.next.length < 8 || pw.next !== pw.confirm || changePw.isPending} data-testid="button-change-password">Change password</Button>
+          </form>
+          <p className="mt-3 text-xs text-muted-foreground">One shared password for the host app. Guest card pages and webhooks don't need it.</p>
+        </Section>
         <Section title="Webhook URLs">
           <ul className="space-y-2">
             {hooks.map(([l, u]) => (

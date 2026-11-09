@@ -1,8 +1,9 @@
 import type { ReactNode } from "react";
 import { Link, useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
-import { LayoutDashboard, CalendarDays, Armchair, Map, ShieldCheck, PhoneCall, SlidersHorizontal, Settings, Building2 } from "lucide-react";
+import { LogOut, LayoutDashboard, CalendarDays, Armchair, Map, ShieldCheck, PhoneCall, SlidersHorizontal, Settings, Building2 } from "lucide-react";
 import { useApp } from "@/lib/app-context";
+import { useAuth } from "@/components/auth-gate";
 import { cn } from "@/lib/utils";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
@@ -32,6 +33,7 @@ function Mark() {
 export function Shell({ children }: { children: ReactNode }) {
   const [path] = useLocation();
   const { locations, locationId, setLocationId } = useApp();
+  const { signOut } = useAuth();
   const { data: big = [] } = useQuery<any[]>({
     queryKey: ["/api/locations", locationId, "confirmations"], enabled: !!locationId, refetchInterval: 30000,
   });
@@ -71,13 +73,16 @@ export function Shell({ children }: { children: ReactNode }) {
         </div>
         <div className="px-3 pb-3">{switcher}</div>
         <nav className="flex flex-1 flex-col gap-0.5 overflow-y-auto px-2">{NAV.map((n) => item(n))}</nav>
-        <div className="border-t px-4 py-3 text-xs text-muted-foreground">Demo mode keeps texts, calls and charges simulated.</div>
+        <div className="border-t px-2 py-2">
+          <button type="button" onClick={signOut} className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm text-foreground/80 hover:bg-sidebar-accent" data-testid="button-sign-out"><LogOut className="h-4 w-4" />Sign out</button>
+        </div>
       </aside>
       <div className="min-w-0">
         <header className="sticky top-0 z-20 border-b bg-background/95 backdrop-blur md:hidden">
           <div className="flex items-center gap-2 px-4 py-2.5 text-primary">
             <Mark /><span className="font-semibold text-foreground">SeatSmart</span>
-            <div className="ml-auto w-40">{switcher}</div>
+            <div className="ml-auto w-36">{switcher}</div>
+            <button type="button" onClick={signOut} aria-label="Sign out" className="rounded-md p-2 text-foreground/70 hover:bg-muted" data-testid="button-sign-out-mobile"><LogOut className="h-4 w-4" /></button>
           </div>
           <nav className="flex gap-1 overflow-x-auto px-3 pb-2">{NAV.map((n) => item(n, true))}</nav>
         </header>
