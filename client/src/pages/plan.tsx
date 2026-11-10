@@ -9,9 +9,11 @@ import { BlocksManager } from "@/components/blocks-manager";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
-import { ChevronLeft, ChevronRight, Printer, PhoneCall, RefreshCw } from "lucide-react";
+import { ChevronLeft, ChevronRight, Printer, PhoneCall, RefreshCw, Pencil, Lock } from "lucide-react";
+import { useState } from "react";
+import { AssignTableDialog } from "@/components/assign-table";
 
-function PlanTable({ title, plan, byId, onOffer, testId }: { title: string; plan: SeatingPlan; byId: Map<number, Reservation>; onOffer: (id: number) => void; testId: string }) {
+function PlanTable({ title, plan, byId, onOffer, onEdit, testId }: { title: string; plan: SeatingPlan; byId: Map<number, Reservation>; onOffer: (id: number) => void; onEdit: (id: number, plan: SeatingPlan) => void; testId: string }) {
   const patio = plan.assignments.filter((a) => a.area === "patio").length;
   const ballroom = plan.assignments.filter((a) => a.area === "ballroom").length;
   return (
@@ -39,9 +41,10 @@ function PlanTable({ title, plan, byId, onOffer, testId }: { title: string; plan
                   <td className="whitespace-nowrap px-3 py-2 font-mono tabular-nums">{minToLabel(a.startMin)}<span className="text-muted-foreground"> – {minToLabel(a.endMin)}</span></td>
                   <td className="px-3 py-2 font-medium">{r.guestName}{r.birthday && <span className="ml-1 text-xs font-normal">(birthday)</span>}</td>
                   <td className="px-3 py-2 text-right tabular-nums">{r.partySize}</td>
-                  <td className="whitespace-nowrap px-3 py-2 font-semibold">{a.labels}{a.area === "patio" && <span className="ml-1 text-xs font-normal">patio</span>}</td>
-                  <td className="px-3 py-2 text-xs text-muted-foreground">{a.reason}</td>
-                  <td className="px-2 py-1 print:hidden">
+                  <td className="whitespace-nowrap px-3 py-2 font-semibold">{a.manual && <Lock className="mr-1 inline h-3 w-3" aria-label="Locked by host" />}{a.labels}{a.area === "patio" && <span className="ml-1 text-xs font-normal">patio</span>}</td>
+                  <td className={cn("px-3 py-2 text-xs", a.conflict ? "font-medium text-destructive" : "text-muted-foreground")}>{a.reason}</td>
+                  <td className="whitespace-nowrap px-2 py-1 print:hidden">
+                    <Button variant="ghost" size="sm" onClick={() => onEdit(r.id, plan)} data-testid={`button-edit-table-${testId}-${r.id}`} title="Change table"><Pencil className="h-3.5 w-3.5" /></Button>
                     {a.area === "patio" && r.preference !== "patio" && (
                       <Button variant="ghost" size="sm" onClick={() => onOffer(r.id)} data-testid={`button-offer-inside-${r.id}`} title="AI call: offer inside if a table opens"><PhoneCall className="h-3.5 w-3.5" /></Button>
                     )}
@@ -55,7 +58,7 @@ function PlanTable({ title, plan, byId, onOffer, testId }: { title: string; plan
       {plan.unseated.length > 0 && (
         <div className="border-t px-4 py-3 text-sm">
           <div className="mb-1 font-medium text-destructive">Couldn't seat</div>
-          {plan.unseated.map((u) => <div key={u.reservationId} className="mb-1"><span className="font-medium">{byId.get(u.reservationId)?.guestName} ({byId.get(u.reservationId)?.partySize})</span>: {u.reason}{u.suggestion && <div className="text-xs text-muted-foreground">Fix: {u.suggestion}</div>}</div>)}
+          {plan.unseated.map((u) => <div key={u.reservationId} className="mb-1"><Button variant="outline" size="sm" className="mr-2 h-6 px-2 text-xs print:hidden" onClick={() => onEdit(u.reservationId, plan)} data-testid={`button-assign-${testId}-${u.reservationId}`}>Assign</Button><span className="font-medium">{byId.get(u.reservationId)?.guestName} ({byId.get(u.reservationId)?.partySize})</span>: {u.reason}{u.suggestion && <div className="text-xs text-muted-foreground">Fix: {u.suggestion}</div>}</div>)}
         </div>
       )}
     </section>
@@ -80,6 +83,7 @@ export default function Plan() {
     onError: (e) => toast({ title: "Call failed", description: errMsg(e), variant: "destructive" }),
   });
   const byId = new Map(list.map((r) => [r.id, r]));
+  const [edit, setEdit] = useState<{ id: number; plan: SeatingPlan } | null>(null);
 
   return (
     <div>
@@ -103,10 +107,11 @@ export default function Plan() {
         <Empty title="No reservations to seat on this day" />
       ) : (
         <div className="grid gap-5 2xl:grid-cols-2">
-          <PlanTable title="Standard turns" plan={data.standard} byId={byId} onOffer={(id) => offer.mutate(id)} testId="standard" />
-          <PlanTable title={`With +${data.cushion.cushion} min cushion`} plan={data.cushion} byId={byId} onOffer={(id) => offer.mutate(id)} testId="cushion" />
+          <PlanTable title="Standard turns" plan={data.standard} byId={byId} onOffer={(id) => offer.mutate(id)} onEdit={(id, p) => setEdit({ id, plan: p })} testId="standard" />
+          <PlanTable title={`With +${data.cushion.cushion} min cushion`} plan={data.cushion} byId={byId} onOffer={(id) => offer.mutate(id)} onEdit={(id, p) => setEdit({ id, plan: p })} testId="cushion" />
         </div>
       )}
+      {locationId && <AssignTableDialog locationId={locationId} reservation={edit ? byId.get(edit.id) || null : null} plan={edit?.plan} open={!!edit} onOpenChange={(v) => !v && setEdit(null)} />}
       {locationId && <div className="mt-5 print:hidden"><BlocksManager locationId={locationId} date={date} /></div>}
     </div>
   );

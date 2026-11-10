@@ -98,7 +98,27 @@ export function generatePlan(
   const vipSet = new Set(active.filter((x) => x.visits >= r.vipMinVisits).map((x) => x.id));
   const areas = bookableAreas(r);
 
-  for (const res of priorityOrder(active, r)) {
+  // 1) host-locked tables first, exactly as assigned
+  const tById = new Map(tables.map((t) => [t.id, t]));
+  const lockedIds = new Set<number>();
+  for (const res of active) {
+    const ids = (res.assignedTables || "").split(",").filter(Boolean).map(Number).filter((id) => tById.has(id));
+    if (!ids.length) continue;
+    lockedIds.add(res.id);
+    const ts = ids.map((id) => tById.get(id)!);
+    const start = toMin(res.time);
+    const end = start + turnFor(res.partySize, r) + cushion;
+    const cap = ts.reduce((x, t) => x + t.capacity, 0);
+    const clash = ids.filter((id) => overlaps(busy.get(id), start, end)).map((id) => tById.get(id)!.label);
+    const blockedOn = ids.filter((id) => overlaps(blocked.get(id), start, end)).map((id) => tById.get(id)!.label);
+    const u: Unit = { tableIds: ids, labels: ts.map((t) => t.label).join("+"), capacity: cap, area: ts[0].area, size: ts.length };
+    book(u, start, end);
+    const warn = [cap < res.partySize ? `only ${cap} seats for ${res.partySize}` : "", clash.length ? `double-booked with ${clash.join(", ")}` : "", blockedOn.length ? `table ${blockedOn.join(", ")} is blocked` : ""].filter(Boolean).join("; ");
+    assignments.push({ reservationId: res.id, tableIds: ids, labels: u.labels, area: u.area, startMin: start, endMin: end, reason: `Assigned by host${warn ? ` — check: ${warn}` : ""}`, manual: true, conflict: !!warn });
+  }
+
+  // 2) everyone else, by priority
+  for (const res of priorityOrder(active.filter((x) => !lockedIds.has(x.id)), r)) {
     const start = toMin(res.time);
     const end = start + turnFor(res.partySize, r) + cushion;
     const pref = effectivePreference(res);

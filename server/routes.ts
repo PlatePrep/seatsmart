@@ -224,7 +224,12 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     res.json({ added, errors });
   });
   app.patch("/api/reservations/:id", (req, res) => {
-    const allowed = ["date", "time", "guestName", "phone", "email", "partySize", "visits", "notes", "birthday", "preference", "status"];
+    const allowed = ["date", "time", "guestName", "phone", "email", "partySize", "visits", "notes", "birthday", "preference", "status", "assignedTables"];
+    if (req.body?.assignedTables !== undefined) {
+      const ids = String(req.body.assignedTables).split(",").map((x) => x.trim()).filter(Boolean);
+      if (ids.some((x) => !/^\d+$/.test(x))) return res.status(400).json({ message: "Bad table list" });
+      req.body.assignedTables = ids.join(",");
+    }
     const data = Object.fromEntries(Object.entries(req.body || {}).filter(([k]) => allowed.includes(k)));
     if (!storage.getReservation(id(req))) return res.status(404).json({ message: "Not found" });
     storage.updateReservation(id(req), data as any);

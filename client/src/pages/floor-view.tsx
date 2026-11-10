@@ -10,7 +10,8 @@ import { Input } from "@/components/ui/input";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
-import { ChevronLeft, ChevronRight, Pause, Play } from "lucide-react";
+import { ChevronLeft, ChevronRight, Pause, Play, Pencil, Lock } from "lucide-react";
+import { AssignTableDialog } from "@/components/assign-table";
 
 function autoSize(t: { shape: string; capacity: number }) {
   return t.shape === "rect" ? 11 : t.capacity >= 8 ? 9 : t.capacity >= 4 ? 7 : 6;
@@ -68,6 +69,7 @@ export default function FloorView() {
   const room = rooms.find((r) => r.id === roomId) || rooms[0];
   const roomTables = tables.filter((x) => x.roomId === room?.id && x.active);
   const [sel, setSel] = useState<number | null>(null);
+  const [editId, setEditId] = useState<number | null>(null);
 
   const stateOf = (tb: DiningTable): State => {
     const blk = blocks.find((b) => (b.tableId === tb.id || (!b.tableId && b.roomId === tb.roomId)) && (!b.startTime || toMin(b.startTime) <= t) && (!b.endTime || toMin(b.endTime) > t));
@@ -114,7 +116,7 @@ export default function FloorView() {
         <Button size="icon" variant="outline" onClick={() => { if (t >= range.hi) setAt(range.lo); setPlaying(!playing); }} aria-label={playing ? "Pause" : "Play the night"} data-testid="button-play">
           {playing ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
         </Button>
-        <span className="w-20 font-mono text-lg font-semibold tabular-nums" data-testid="text-time">{minToLabel(t)}</span>
+        <span className="w-24 whitespace-nowrap font-mono text-lg font-semibold tabular-nums" data-testid="text-time">{minToLabel(t)}</span>
         <Slider value={[t]} min={range.lo} max={range.hi} step={15} onValueChange={(v) => { setPlaying(false); setAt(v[0]); }} className="min-w-[180px] flex-1" aria-label="Time" data-testid="slider-time" />
         <span className="text-xs text-muted-foreground">{minToLabel(range.lo)} – {minToLabel(range.hi)}</span>
       </div>
@@ -153,9 +155,9 @@ export default function FloorView() {
                 <button key={x.id} type="button" onClick={() => setSel(x.id)} style={style}
                   title={s.res ? `${s.res.guestName} (${s.res.partySize}) ${minToLabel(s.a!.startMin)}–${minToLabel(s.a!.endMin)} · table ${s.a!.labels}` : s.next ? `Next: ${s.next.res?.guestName} at ${minToLabel(s.next.a.startMin)}` : `Table ${x.label}`}
                   className={cn("absolute flex flex-col items-center justify-center overflow-hidden border-2 px-0.5 text-center leading-[1.05] shadow-sm transition-colors",
-                    STYLE[s.kind], x.shape === "round" ? "rounded-full" : "rounded-md", s.res?.birthday && "ring-2 ring-[hsl(45_90%_50%)]", sel === x.id && "ring-2 ring-foreground ring-offset-2")}
+                    STYLE[s.kind], x.shape === "round" ? "rounded-full" : "rounded-md", s.res?.birthday && "ring-2 ring-[hsl(45_90%_50%)]", s.a?.conflict && "ring-2 ring-destructive", sel === x.id && "ring-2 ring-foreground ring-offset-2")}
                   data-testid={`ftable-${x.id}`}>
-                  <span className="text-[9px] font-medium opacity-80">{x.label}</span>
+                  <span className="text-[9px] font-medium opacity-80">{x.label}{s.a?.manual && <Lock className="ml-0.5 inline h-2 w-2" />}</span>
                   {s.res ? (
                     lead ? (<>
                       <span className="text-[13px] font-bold tracking-tight">{initials(s.res.guestName)}<span className="ml-0.5 text-[10px] font-semibold">·{s.res.partySize}</span></span>
@@ -191,6 +193,9 @@ export default function FloorView() {
                   <div className="text-muted-foreground">{minToLabel(selState.a!.startMin)} – {minToLabel(selState.a!.endMin)} · {selState.a!.labels}</div>
                   {selState.res.visits > 0 && <div className="text-muted-foreground">{selState.res.visits} prior visits</div>}
                   {selState.res.notes && <div className="mt-1 text-xs text-muted-foreground">{selState.res.notes}</div>}
+                  {selState.a?.manual && <div className="mt-1 flex items-center gap-1 text-xs"><Lock className="h-3 w-3" />Locked by host</div>}
+                  {selState.a?.conflict && <div className="mt-1 text-xs text-destructive">{selState.a.reason}</div>}
+                  <Button size="sm" variant="outline" className="mt-2" onClick={() => setEditId(selState.res!.id)} data-testid="button-change-table"><Pencil className="mr-1.5 h-3.5 w-3.5" />Change table</Button>
                 </div>
               ) : <p className="mt-2 text-sm text-muted-foreground">{selState.kind === "walkin" ? "Held for walk-ins." : selState.kind === "closed" ? "Closed." : "Open now."}</p>}
               {selState.next && <p className="mt-2 text-sm">Next: <span className="font-medium">{selState.next.res?.guestName} ({selState.next.res?.partySize})</span> at {minToLabel(selState.next.a.startMin)}</p>}
@@ -198,7 +203,8 @@ export default function FloorView() {
                 <div className="mb-1 text-xs font-medium text-muted-foreground">Tonight on this table</div>
                 {(plan?.assignments || []).filter((a) => a.tableIds.includes(selTable.id)).sort((a, b) => a.startMin - b.startMin).map((a) => (
                   <div key={a.reservationId} className={cn("flex justify-between text-xs", a.startMin <= t && a.endMin > t && "font-semibold")}>
-                    <span>{minToLabel(a.startMin)}–{minToLabel(a.endMin)}</span><span>{byId.get(a.reservationId)?.guestName} ({byId.get(a.reservationId)?.partySize})</span>
+                    <span>{minToLabel(a.startMin)}–{minToLabel(a.endMin)}</span>
+                    <button className="hover:underline" onClick={() => setEditId(a.reservationId)} title="Change table">{byId.get(a.reservationId)?.guestName} ({byId.get(a.reservationId)?.partySize})</button>
                   </div>
                 ))}
               </div>
@@ -210,7 +216,7 @@ export default function FloorView() {
             <ul className="max-h-64 divide-y overflow-auto text-sm">
               {seatedHere.length === 0 && <li className="px-4 py-2 text-muted-foreground">Nobody seated in this room.</li>}
               {seatedHere.sort((a, b) => a.a!.startMin - b.a!.startMin).map((s) => (
-                <li key={s.a!.reservationId} className="flex items-center gap-2 px-4 py-1.5">
+                <li key={s.a!.reservationId} className="flex cursor-pointer items-center gap-2 px-4 py-1.5 hover:bg-muted" onClick={() => setEditId(s.a!.reservationId)} title="Change table">
                   <span className={cn("w-8 shrink-0 rounded px-1 text-center text-xs font-bold", s.kind === "finishing" ? "bg-warn" : "bg-primary text-primary-foreground")}>{initials(s.res?.guestName || "")}</span>
                   <span className="min-w-0 flex-1 truncate">{s.res?.guestName} ({s.res?.partySize})</span>
                   <span className="shrink-0 text-xs text-muted-foreground">{s.a!.labels} · out {minToLabel(s.a!.endMin)}</span>
@@ -224,7 +230,7 @@ export default function FloorView() {
             <ul className="divide-y text-sm">
               {arriving.length === 0 && <li className="px-4 py-2 text-muted-foreground">No arrivals.</li>}
               {arriving.map((a) => (
-                <li key={a.reservationId} className="flex items-center gap-2 px-4 py-1.5">
+                <li key={a.reservationId} className="flex cursor-pointer items-center gap-2 px-4 py-1.5 hover:bg-muted" onClick={() => setEditId(a.reservationId)} title="Change table">
                   <span className="w-14 shrink-0 font-mono text-xs tabular-nums">{minToLabel(a.startMin)}</span>
                   <span className="min-w-0 flex-1 truncate">{byId.get(a.reservationId)?.guestName} ({byId.get(a.reservationId)?.partySize})</span>
                   <span className="shrink-0 text-xs text-muted-foreground">{a.labels}</span>
@@ -232,7 +238,19 @@ export default function FloorView() {
               ))}
             </ul>
           </section>
-          {plan && plan.unseated.length > 0 && <p className="text-xs text-destructive">{plan.unseated.length} reservations couldn't be seated — see Seating plan.</p>}
+          {plan && plan.unseated.length > 0 && (
+            <section className="rounded-lg border border-destructive/30 bg-card" data-testid="panel-unseated">
+              <div className="border-b px-4 py-2.5 text-sm font-semibold text-destructive">Not seated ({plan.unseated.length})</div>
+              <ul className="divide-y text-sm">
+                {plan.unseated.map((u) => { const x = byId.get(u.reservationId); return (
+                  <li key={u.reservationId} className="flex items-center gap-2 px-4 py-1.5">
+                    <span className="min-w-0 flex-1 truncate">{x?.guestName} ({x?.partySize}) {x ? minToLabel(toMin(x.time)) : ""}</span>
+                    <Button size="sm" variant="outline" className="h-6 px-2 text-xs" onClick={() => setEditId(u.reservationId)} data-testid={`button-assign-${u.reservationId}`}>Assign</Button>
+                  </li>); })}
+              </ul>
+            </section>
+          )}
+          {locationId && <AssignTableDialog locationId={locationId} reservation={editId ? byId.get(editId) || null : null} plan={plan} open={!!editId} onOpenChange={(v) => !v && setEditId(null)} />}
         </div>
       </div>
     </div>

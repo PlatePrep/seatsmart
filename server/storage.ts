@@ -73,6 +73,7 @@ function addColumn(table: string, col: string, ddl: string) {
   if (!cols.some((c) => c.name === col)) sqlite.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${ddl}`);
 }
 addColumn("dining_tables", "room_id", "INTEGER NOT NULL DEFAULT 0");
+addColumn("reservations", "assigned_tables", "TEXT NOT NULL DEFAULT ''");
 addColumn("dining_tables", "w", "INTEGER NOT NULL DEFAULT 0");
 addColumn("dining_tables", "h", "INTEGER NOT NULL DEFAULT 0");
 addColumn("rules", "pacing_covers", "INTEGER NOT NULL DEFAULT 30");

@@ -57,6 +57,8 @@ export const reservations = sqliteTable("reservations", {
   bookedAt: text("booked_at").notNull(), // ISO
   notes: text("notes").notNull().default(""),
   birthday: integer("birthday", { mode: "boolean" }).notNull().default(false),
+  // host-locked table ids, comma separated ("" = let SeatSmart choose)
+  assignedTables: text("assigned_tables").notNull().default(""),
   preference: text("preference").notNull().default("any"), // any | inside | patio
   status: text("status").notNull().default("booked"),
   requiresCard: integer("requires_card", { mode: "boolean" }).notNull().default(false),
@@ -212,6 +214,8 @@ export type SeatAssignment = {
   startMin: number;
   endMin: number;
   reason: string;
+  manual?: boolean;
+  conflict?: boolean;
 };
 export type SeatingPlan = {
   date: string;
