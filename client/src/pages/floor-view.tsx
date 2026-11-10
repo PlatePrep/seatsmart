@@ -23,6 +23,15 @@ export function initials(name: string) {
 }
 const nowMin = () => { const d = new Date(new Date().toLocaleString("en-US", { timeZone: "America/New_York" })); return d.getHours() * 60 + d.getMinutes(); };
 
+// one color per hour of seating, same hour = same color on every table
+const HOUR_COLORS: Record<number, [string, string]> = {
+  10: ["hsl(190 65% 38%)", "#fff"], 11: ["hsl(230 55% 50%)", "#fff"], 12: ["hsl(198 80% 38%)", "#fff"], 13: ["hsl(142 50% 34%)", "#fff"],
+  14: ["hsl(80 55% 42%)", "#111"], 15: ["hsl(45 92% 52%)", "#111"], 16: ["hsl(28 88% 52%)", "#111"], 17: ["hsl(6 70% 48%)", "#fff"],
+  18: ["hsl(338 62% 45%)", "#fff"], 19: ["hsl(290 45% 42%)", "#fff"], 20: ["hsl(255 50% 52%)", "#fff"], 21: ["hsl(225 62% 42%)", "#fff"],
+  22: ["hsl(215 15% 38%)", "#fff"], 23: ["hsl(0 0% 30%)", "#fff"],
+};
+export const hourColor = (min: number) => HOUR_COLORS[Math.min(23, Math.max(10, Math.floor(min / 60)))];
+
 type State = { kind: "seated" | "finishing" | "next" | "walkin" | "closed" | "free"; a?: SeatAssignment; res?: Reservation; next?: { a: SeatAssignment; res?: Reservation } };
 
 export default function FloorView() {
@@ -40,6 +49,7 @@ export default function FloorView() {
     queryFn: () => send("POST", `/api/locations/${locationId}/plan/generate`, { date }), enabled,
   });
   const [cushion, setCushion] = useState(false);
+  const [allTimes, setAllTimes] = useState(false);
   const plan = plans ? (cushion ? plans.cushion : plans.standard) : null;
   const byId = useMemo(() => new Map(list.map((r) => [r.id, r])), [list]);
 
@@ -87,6 +97,11 @@ export default function FloorView() {
   const coversHere = seatedHere.reduce((s, x) => s + (x.res?.partySize || 0), 0);
   const seatsHere = roomTables.reduce((s, x) => s + x.capacity, 0);
   const arriving = (plan?.assignments || []).filter((a) => a.startMin >= t && a.startMin < t + 30 && a.tableIds.some((id) => roomTables.some((x) => x.id === id))).sort((a, b) => a.startMin - b.startMin);
+  const dayOf = (id: number) => (plan?.assignments || []).filter((a) => a.tableIds.includes(id)).sort((a, b) => a.startMin - b.startMin);
+  const dayAs = (plan?.assignments || []).filter((a) => a.tableIds.some((id) => roomTables.some((x) => x.id === id)));
+  const hoursHere = Array.from(new Set(dayAs.map((a) => Math.min(23, Math.max(10, Math.floor(a.startMin / 60)))))).sort((a, b) => a - b);
+  const dayCovers = dayAs.reduce((s, a) => s + (byId.get(a.reservationId)?.partySize || 0), 0);
+  const usedTables = roomTables.filter((x) => dayOf(x.id).length > 0).length;
   const hasImg = !!room?.imageData;
   const aspect = hasImg && room!.imageW && room!.imageH ? `${room!.imageW} / ${room!.imageH}` : "16 / 11";
   const selTable = roomTables.find((x) => x.id === sel);
@@ -113,25 +128,39 @@ export default function FloorView() {
       </div>
 
       <div className="mb-3 flex flex-wrap items-center gap-3 rounded-lg border bg-card px-3 py-2.5">
+        <div className="flex rounded-md border p-0.5" role="group" aria-label="View mode">
+          <button type="button" onClick={() => setAllTimes(false)} className={cn("rounded px-2.5 py-1 text-sm font-medium", !allTimes ? "bg-primary text-primary-foreground" : "hover:bg-muted")} aria-pressed={!allTimes} data-testid="button-mode-time">One time</button>
+          <button type="button" onClick={() => { setPlaying(false); setAllTimes(true); }} className={cn("rounded px-2.5 py-1 text-sm font-medium", allTimes ? "bg-primary text-primary-foreground" : "hover:bg-muted")} aria-pressed={allTimes} data-testid="button-mode-all">All times</button>
+        </div>
+        {allTimes ? (
+          <span className="text-sm text-muted-foreground">Each table is split into one color per seating, left to right in time order. Same color = same hour.</span>
+        ) : (<>
         <Button size="icon" variant="outline" onClick={() => { if (t >= range.hi) setAt(range.lo); setPlaying(!playing); }} aria-label={playing ? "Pause" : "Play the night"} data-testid="button-play">
           {playing ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
         </Button>
         <span className="w-24 whitespace-nowrap font-mono text-lg font-semibold tabular-nums" data-testid="text-time">{minToLabel(t)}</span>
         <Slider value={[t]} min={range.lo} max={range.hi} step={15} onValueChange={(v) => { setPlaying(false); setAt(v[0]); }} className="min-w-[180px] flex-1" aria-label="Time" data-testid="slider-time" />
         <span className="text-xs text-muted-foreground">{minToLabel(range.lo)} – {minToLabel(range.hi)}</span>
+        </>)}
       </div>
 
       <div className="mb-3 flex flex-wrap items-center gap-2" role="tablist" aria-label="Rooms">
         {rooms.map((r) => {
-          const n = (plan?.assignments || []).filter((a) => a.startMin <= t && a.endMin > t && a.tableIds.some((id) => tables.find((x) => x.id === id)?.roomId === r.id));
+          const n = (plan?.assignments || []).filter((a) => (allTimes || (a.startMin <= t && a.endMin > t)) && a.tableIds.some((id) => tables.find((x) => x.id === id)?.roomId === r.id));
           return (
             <button key={r.id} role="tab" aria-selected={room?.id === r.id} onClick={() => { setRoomId(r.id); setSel(null); }}
               className={cn("rounded-full border px-3 py-1.5 text-sm font-medium transition-colors", room?.id === r.id ? "border-primary bg-primary text-primary-foreground" : "bg-card hover:bg-muted")}
               data-testid={`tab-room-${r.id}`}>
-              {r.name} <span className={cn("ml-1 text-xs", room?.id === r.id ? "opacity-80" : "text-muted-foreground")}>{n.length} seated</span>
+              {r.name} <span className={cn("ml-1 text-xs", room?.id === r.id ? "opacity-80" : "text-muted-foreground")}>{n.length} {allTimes ? "parties" : "seated"}</span>
             </button>
           );
         })}
+        {allTimes ? (
+        <span className="ml-auto flex flex-wrap items-center gap-2.5 text-xs text-muted-foreground" data-testid="legend-hours">
+          {hoursHere.map((h) => <span key={h} className="flex items-center gap-1"><span className="h-3 w-3 rounded-sm" style={{ background: hourColor(h * 60)[0] }} />{minToLabel(h * 60).replace(":00", "")}</span>)}
+          <span className="flex items-center gap-1"><span className="h-3 w-3 rounded-sm border border-foreground/40 bg-card" />Unused</span>
+        </span>
+        ) : (
         <span className="ml-auto flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
           <span className="flex items-center gap-1"><span className="h-3 w-3 rounded-sm bg-primary" />Seated</span>
           <span className="flex items-center gap-1"><span className="h-3 w-3 rounded-sm bg-warn" />Done in 15 min</span>
@@ -139,6 +168,7 @@ export default function FloorView() {
           <span className="flex items-center gap-1"><span className="h-3 w-3 rounded-sm border border-foreground/40 bg-card" />Open</span>
           <span className="flex items-center gap-1"><span className="h-3 w-3 rounded-sm border border-dashed border-foreground/50" />Walk-ins only</span>
         </span>
+        )}
       </div>
 
       <div className="grid gap-5 lg:grid-cols-[1fr_300px]">
@@ -151,6 +181,30 @@ export default function FloorView() {
               const style: React.CSSProperties = { left: `${x.x}%`, top: `${x.y}%`, width: `${w}%` };
               if (x.h) style.height = `${x.h}%`; else style.aspectRatio = x.shape === "rect" ? "2 / 1" : "1 / 1";
               const lead = s.a && s.a.tableIds[0] === x.id; // merged party: details on first table
+              if (allTimes) {
+                const segs = dayOf(x.id);
+                const dayBlock = blocks.some((b) => (b.tableId === x.id || (!b.tableId && b.roomId === x.roomId)));
+                const showText = segs.length > 0 && w / segs.length >= 3.4;
+                return (
+                  <button key={x.id} type="button" onClick={() => setSel(x.id)} style={style}
+                    title={`Table ${x.label}` + (segs.length ? "\n" + segs.map((a) => `${minToLabel(a.startMin)}–${minToLabel(a.endMin)} ${byId.get(a.reservationId)?.guestName} (${byId.get(a.reservationId)?.partySize})`).join("\n") : " · no seatings")}
+                    className={cn("absolute flex overflow-hidden border-2 bg-card text-center leading-[1.05] shadow-sm", x.shape === "round" ? "rounded-full" : "rounded-md",
+                      dayBlock ? "border-dashed border-foreground/50" : "border-foreground/40", segs.some((a) => a.conflict) && "ring-2 ring-destructive", sel === x.id && "ring-2 ring-foreground ring-offset-2")}
+                    data-testid={`ftable-${x.id}`}>
+                    {segs.length === 0 ? (
+                      <span className="m-auto flex flex-col"><span className="text-[9px] font-medium opacity-80">{x.label}</span><span className="text-[10px] opacity-60">{x.capacity}</span></span>
+                    ) : segs.map((a, i) => { const [bg, fg] = hourColor(a.startMin); const r = byId.get(a.reservationId); return (
+                      <span key={a.reservationId} style={{ background: bg, color: fg }} className={cn("flex min-w-0 flex-1 flex-col items-center justify-center", i > 0 && "border-l border-white/70")}>
+                        {showText && <>
+                          {i === 0 && <span className="text-[8px] font-medium opacity-90">{x.label}{a.manual && <Lock className="ml-0.5 inline h-2 w-2" />}</span>}
+                          <span className="text-[10px] font-bold">{initials(r?.guestName || "")}</span>
+                          <span className="text-[8px] tabular-nums">{minToLabel(a.startMin).replace(/ ?[AP]M/, "").replace(":00", "")}</span>
+                        </>}
+                      </span>); })}
+                    {segs.length > 0 && !showText && <span className="pointer-events-none absolute inset-0 m-auto flex h-fit w-fit items-center rounded bg-card/90 px-0.5 text-[9px] font-semibold text-foreground">{x.label}·{segs.length}</span>}
+                  </button>
+                );
+              }
               return (
                 <button key={x.id} type="button" onClick={() => setSel(x.id)} style={style}
                   title={s.res ? `${s.res.guestName} (${s.res.partySize}) ${minToLabel(s.a!.startMin)}–${minToLabel(s.a!.endMin)} · table ${s.a!.labels}` : s.next ? `Next: ${s.next.res?.guestName} at ${minToLabel(s.next.a.startMin)}` : `Table ${x.label}`}
@@ -174,6 +228,17 @@ export default function FloorView() {
         </div>
 
         <div className="space-y-4">
+          {allTimes ? (
+          <section className="rounded-lg border bg-card p-4" data-testid="panel-room-summary">
+            <div className="text-xs text-muted-foreground">{room?.name} · whole day</div>
+            <div className="mt-1 text-2xl font-semibold tabular-nums">{dayCovers}<span className="text-sm font-normal text-muted-foreground"> covers</span></div>
+            <div className="mt-1 flex flex-wrap gap-1.5">
+              <Pill t="teal">{dayAs.length} parties</Pill>
+              <Pill t="gray">{usedTables} of {roomTables.length} tables used</Pill>
+              <Pill t="gray">{usedTables ? (roomTables.reduce((s, x) => s + dayOf(x.id).length, 0) / usedTables).toFixed(1) : "0"} turns per used table</Pill>
+            </div>
+          </section>
+          ) : (
           <section className="rounded-lg border bg-card p-4" data-testid="panel-room-summary">
             <div className="text-xs text-muted-foreground">{room?.name} at {minToLabel(t)}</div>
             <div className="mt-1 text-2xl font-semibold tabular-nums">{coversHere}<span className="text-sm font-normal text-muted-foreground"> / {seatsHere} seats</span></div>
@@ -182,12 +247,13 @@ export default function FloorView() {
               <Pill t="gray">{roomTables.filter((x) => states.get(x.id)?.kind === "free" || states.get(x.id)?.kind === "next").length} tables open</Pill>
             </div>
           </section>
+          )}
 
           {selTable && selState && (
             <section className="rounded-lg border bg-card p-4" data-testid="panel-table">
               <div className="flex items-center justify-between"><h2 className="text-sm font-semibold">Table {selTable.label} · {selTable.capacity} seats</h2>
                 <button className="text-xs text-muted-foreground hover:underline" onClick={() => setSel(null)}>Close</button></div>
-              {selState.res ? (
+              {allTimes ? null : selState.res ? (
                 <div className="mt-2 text-sm">
                   <div className="font-medium">{selState.res.guestName} ({selState.res.partySize}){selState.res.birthday && " · birthday"}</div>
                   <div className="text-muted-foreground">{minToLabel(selState.a!.startMin)} – {minToLabel(selState.a!.endMin)} · {selState.a!.labels}</div>
@@ -198,12 +264,12 @@ export default function FloorView() {
                   <Button size="sm" variant="outline" className="mt-2" onClick={() => setEditId(selState.res!.id)} data-testid="button-change-table"><Pencil className="mr-1.5 h-3.5 w-3.5" />Change table</Button>
                 </div>
               ) : <p className="mt-2 text-sm text-muted-foreground">{selState.kind === "walkin" ? "Held for walk-ins." : selState.kind === "closed" ? "Closed." : "Open now."}</p>}
-              {selState.next && <p className="mt-2 text-sm">Next: <span className="font-medium">{selState.next.res?.guestName} ({selState.next.res?.partySize})</span> at {minToLabel(selState.next.a.startMin)}</p>}
+              {!allTimes && selState.next && <p className="mt-2 text-sm">Next: <span className="font-medium">{selState.next.res?.guestName} ({selState.next.res?.partySize})</span> at {minToLabel(selState.next.a.startMin)}</p>}
               <div className="mt-3 border-t pt-2">
-                <div className="mb-1 text-xs font-medium text-muted-foreground">Tonight on this table</div>
+                <div className="mb-1 text-xs font-medium text-muted-foreground">All day on this table (click a name to change table)</div>
                 {(plan?.assignments || []).filter((a) => a.tableIds.includes(selTable.id)).sort((a, b) => a.startMin - b.startMin).map((a) => (
-                  <div key={a.reservationId} className={cn("flex justify-between text-xs", a.startMin <= t && a.endMin > t && "font-semibold")}>
-                    <span>{minToLabel(a.startMin)}–{minToLabel(a.endMin)}</span>
+                  <div key={a.reservationId} className={cn("flex justify-between text-xs", !allTimes && a.startMin <= t && a.endMin > t && "font-semibold")}>
+                    <span className="flex items-center gap-1">{allTimes && <span className="h-2.5 w-2.5 rounded-sm" style={{ background: hourColor(a.startMin)[0] }} />}{minToLabel(a.startMin)}–{minToLabel(a.endMin)}</span>
                     <button className="hover:underline" onClick={() => setEditId(a.reservationId)} title="Change table">{byId.get(a.reservationId)?.guestName} ({byId.get(a.reservationId)?.partySize})</button>
                   </div>
                 ))}
@@ -211,6 +277,7 @@ export default function FloorView() {
             </section>
           )}
 
+          {!allTimes && (<>
           <section className="rounded-lg border bg-card" data-testid="panel-seated">
             <div className="border-b px-4 py-2.5 text-sm font-semibold">Seated now ({seatedHere.length})</div>
             <ul className="max-h-64 divide-y overflow-auto text-sm">
@@ -238,6 +305,7 @@ export default function FloorView() {
               ))}
             </ul>
           </section>
+          </>)}
           {plan && plan.unseated.length > 0 && (
             <section className="rounded-lg border border-destructive/30 bg-card" data-testid="panel-unseated">
               <div className="border-b px-4 py-2.5 text-sm font-semibold text-destructive">Not seated ({plan.unseated.length})</div>
