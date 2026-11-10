@@ -111,7 +111,16 @@ export function generatePlan(
       if (cands.length) { placed = cands[0]; break; }
     }
     if (!placed) {
-      const fix = customSetup(tables, r, res.partySize, start, end, (id, s, e) => tableFree(id, s, e) && !overlaps(tentative.get(id), s, e));
+      const pad = r.resetMin || 0; // big set-ups need time to reset between parties
+      const fix = customSetup(tables, r, res.partySize, start, end, (id, s, e) => tableFree(id, s - pad, e + pad) && !overlaps(tentative.get(id), s - pad, e + pad));
+      const fixTables = fix.ids.map((id) => tables.find((t) => t.id === id)!).filter(Boolean);
+      // Ballroom is open: seat big parties there for real by pushing rounds together.
+      if (fixTables.length && res.partySize >= r.cardThreshold && fixTables.every((t) => t.area === "ballroom")) {
+        const u: Unit = { tableIds: fix.ids, labels: fixTables.map((t) => t.label).join("+"), capacity: fixTables.reduce((x, t) => x + t.capacity, 0), area: "ballroom", size: fixTables.length };
+        book(u, start, end);
+        assignments.push({ reservationId: res.id, tableIds: u.tableIds, labels: u.labels, area: "ballroom", startMin: start, endMin: end, reason: `Big party: push ballroom rounds ${u.labels} together (${u.capacity} seats)` });
+        continue;
+      }
       for (const id of fix.ids) tentative.set(id, [...(tentative.get(id) || []), [start, end]]);
       unseated.push({ reservationId: res.id, reason: `No table or merge for ${res.partySize} at ${minToLabel(start)}`, suggestion: fix.text, holdTableIds: fix.ids, startMin: start, endMin: end });
       continue;
