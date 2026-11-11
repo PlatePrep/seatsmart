@@ -28,6 +28,7 @@ export default function Reservations() {
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState<any>(blank);
   const [csvOpen, setCsvOpen] = useState(false);
+  const [cancelMissing, setCancelMissing] = useState(true);
   const [csv, setCsv] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -44,8 +45,14 @@ export default function Reservations() {
   });
   const del = useMutation({ mutationFn: (id: number) => send("DELETE", `/api/reservations/${id}`), onSuccess: done });
   const imp = useMutation({
-    mutationFn: () => send("POST", `/api/locations/${locationId}/reservations/import`, { csv, date }),
-    onSuccess: (r: any) => { done(); setCsvOpen(false); setCsv(""); toast({ title: `Imported ${r.added} reservations`, description: r.errors.length ? `${r.errors.length} rows skipped` : undefined }); },
+    mutationFn: () => send("POST", `/api/locations/${locationId}/reservations/import`, { csv, date, cancelMissing }),
+    onSuccess: (r: any) => {
+      done(); setCsvOpen(false); setCsv("");
+      const parts = [`${r.added} new`, `${r.updated} updated`, `${r.unchanged} unchanged`];
+      if (r.cancelled) parts.push(`${r.cancelled} cancelled (not in file): ${r.cancelledNames.slice(0, 6).join(", ")}${r.cancelledNames.length > 6 ? "…" : ""}`);
+      if (r.errors.length) parts.push(`${r.errors.length} rows skipped`);
+      toast({ title: "Upload applied", description: parts.join(" · "), duration: 12000 });
+    },
     onError: (e) => toast({ title: "Import failed", description: errMsg(e), variant: "destructive" }),
   });
 
@@ -137,10 +144,12 @@ export default function Reservations() {
         <DialogContent className="max-w-xl">
           <DialogHeader><DialogTitle>Import OpenTable CSV</DialogTitle></DialogHeader>
           <p className="text-sm text-muted-foreground">Needs columns for Time, Guest name and Party size. Date, Phone, Email, Visits and Notes are used when present. Rows without a date go on {dateLabel(date)}.</p>
+          <p className="text-sm">Uploading a day again updates it. It doesn't duplicate. Guests already on the books are matched by name and phone and updated, keeping card status and calls/texts already sent. New guests are added.</p>
+          <label className="flex items-center gap-2 text-sm"><Switch checked={cancelMissing} onCheckedChange={setCancelMissing} data-testid="switch-cancel-missing" />Cancel uploaded bookings that are no longer in this file (manual adds are never touched)</label>
           <input ref={fileRef} type="file" accept=".csv,text/csv" className="hidden" onChange={async (e) => { const f = e.target.files?.[0]; if (f) setCsv(await f.text()); }} data-testid="input-csv-file" />
           <Button variant="outline" onClick={() => fileRef.current?.click()} data-testid="button-choose-csv">Choose file</Button>
           <Textarea rows={8} className="font-mono text-xs" placeholder={"Date,Time,Guest,Party Size,Phone,Visits,Notes\n2026-11-09,19:00,Jane Doe,4,941-555-0100,3,Birthday"} value={csv} onChange={(e) => setCsv(e.target.value)} data-testid="input-csv-text" />
-          <DialogFooter><Button onClick={() => imp.mutate()} disabled={!csv.trim() || imp.isPending} data-testid="button-run-import">Import</Button></DialogFooter>
+          <DialogFooter><Button onClick={() => imp.mutate()} disabled={!csv.trim() || imp.isPending} data-testid="button-run-import">Apply upload</Button></DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

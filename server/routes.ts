@@ -205,24 +205,65 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     const col = (...names: string[]) => head.findIndex((h) => names.some((n) => h.includes(n)));
     const ci = { date: col("date"), time: col("time"), name: col("guest", "name"), size: col("party", "size", "covers", "people"), phone: col("phone"), email: col("email"), visits: col("visit"), notes: col("note", "request") };
     if (ci.name < 0 || ci.size < 0 || ci.time < 0) return res.status(400).json({ message: "CSV needs Guest/Name, Party size and Time columns" });
-    let added = 0; const errors: string[] = [];
+    const loc = id(req);
+    const errors: string[] = [];
+    const parsed: any[] = [];
     for (const row of rows.slice(1)) {
       if (!row.some((c) => c.trim())) continue;
       const time = normTime(row[ci.time] || "");
       const date = ci.date >= 0 ? normDate(row[ci.date] || "") || fallbackDate : fallbackDate;
       const size = parseInt(row[ci.size] || "", 10);
       if (!time || !size) { errors.push(`Skipped: ${row.join(",").slice(0, 60)}`); continue; }
-      const r = storage.createReservation({
-        locationId: id(req), date, time, guestName: (row[ci.name] || "Guest").trim(), partySize: size,
+      const notes = ci.notes >= 0 ? row[ci.notes] || "" : "";
+      parsed.push({ date, time, guestName: (row[ci.name] || "Guest").trim(), partySize: size,
         phone: ci.phone >= 0 ? row[ci.phone] || "" : "", email: ci.email >= 0 ? row[ci.email] || "" : "",
-        visits: ci.visits >= 0 ? parseInt(row[ci.visits] || "0", 10) || 0 : 0, notes: ci.notes >= 0 ? row[ci.notes] || "" : "",
-        birthday: /birthday|bday/i.test(ci.notes >= 0 ? row[ci.notes] || "" : ""), preference: "any", bookedAt: new Date().toISOString(),
-        status: "booked", requiresCard: false, cardStatus: "not_required", paymentMethodId: "", cardBrand: "", cardLast4: "",
-        outreachToken: "", optedOut: false, noShowCharged: 0,
-      });
-      syncCampaign(r.id); added++;
+        visits: ci.visits >= 0 ? parseInt(row[ci.visits] || "0", 10) || 0 : 0, notes, birthday: /birthday|bday/i.test(notes) });
     }
-    res.json({ added, errors });
+    // Re-uploading a day updates it instead of duplicating: match by name + phone (or name + time),
+    // keep card status / outreach history, add new rows, cancel uploaded bookings that dropped off the file.
+    const nm = (v: string) => v.toLowerCase().replace(/[^a-z0-9]/g, "");
+    const ph = (v: string) => v.replace(/\D/g, "").slice(-10);
+    const cancelMissing = req.body?.cancelMissing !== false;
+    let added = 0, updated = 0, unchanged = 0, cancelled = 0;
+    const cancelledNames: string[] = [];
+    const byDate = new Map<string, any[]>();
+    for (const p of parsed) { if (!byDate.has(p.date)) byDate.set(p.date, []); byDate.get(p.date)!.push(p); }
+    for (const [date, list] of Array.from(byDate.entries())) {
+      const existing = storage.listReservations(loc, date).filter((r) => r.status !== "cancelled");
+      const used = new Set<number>();
+      const pick = (test: (r: any) => boolean) => existing.find((r) => !used.has(r.id) && test(r));
+      for (const p of list) {
+        const n = nm(p.guestName), d = ph(p.phone);
+        const m = pick((r) => nm(r.guestName) === n && !!d && ph(r.phone) === d && r.time === p.time)
+          || pick((r) => nm(r.guestName) === n && !!d && ph(r.phone) === d)
+          || pick((r) => nm(r.guestName) === n && r.time === p.time)
+          || pick((r) => nm(r.guestName) === n && (!d || !ph(r.phone)));
+        if (m) {
+          used.add(m.id);
+          const ch: any = {};
+          for (const k of ["time", "partySize", "phone", "email", "visits", "notes", "birthday"]) {
+            if ((k === "phone" || k === "email") && !p[k]) continue;
+            if ((m as any)[k] !== p[k]) ch[k] = p[k];
+          }
+          if (ch.time !== undefined && m.assignedTables) ch.assignedTables = ""; // time moved: let SeatSmart re-seat
+          if (Object.keys(ch).length) { storage.updateReservation(m.id, ch); syncCampaign(m.id); updated++; } else unchanged++;
+        } else {
+          const r = storage.createReservation({
+            locationId: loc, ...p, preference: "any", bookedAt: new Date().toISOString(),
+            status: "booked", requiresCard: false, cardStatus: "not_required", paymentMethodId: "", cardBrand: "", cardLast4: "",
+            outreachToken: "", optedOut: false, noShowCharged: 0, source: "import",
+          } as any);
+          syncCampaign(r.id); added++;
+        }
+      }
+      if (cancelMissing) for (const r of existing) {
+        if (used.has(r.id) || r.source !== "import" || !["booked", "confirmed"].includes(r.status)) continue;
+        storage.updateReservation(r.id, { status: "cancelled" } as any);
+        storage.addEvent(r.id, "cancelled", "import", "Not in the latest uploaded file");
+        syncCampaign(r.id); cancelled++; cancelledNames.push(`${r.guestName} (${r.partySize}) ${r.time}`);
+      }
+    }
+    res.json({ added, updated, unchanged, cancelled, cancelledNames, dates: Array.from(byDate.keys()).sort(), errors });
   });
   app.patch("/api/reservations/:id", (req, res) => {
     const allowed = ["date", "time", "guestName", "phone", "email", "partySize", "visits", "notes", "birthday", "preference", "status", "assignedTables"];

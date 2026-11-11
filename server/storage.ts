@@ -88,6 +88,13 @@ addColumn("rules", "avg_spend_cents", "INTEGER NOT NULL DEFAULT 7500");
 addColumn("rules", "reset_min", "INTEGER NOT NULL DEFAULT 10");
 addColumn("rules", "use_ballroom", "INTEGER NOT NULL DEFAULT 1");
 addColumn("rules", "service_start", "TEXT NOT NULL DEFAULT ''");
+{
+  const cols = sqlite.prepare(`PRAGMA table_info(reservations)`).all() as { name: string }[];
+  if (!cols.some((c) => c.name === "source")) {
+    sqlite.exec(`ALTER TABLE reservations ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'`);
+    sqlite.exec(`UPDATE reservations SET source = 'import'`); // everything before this came from uploads
+  }
+}
 addColumn("rules", "last_seating", "TEXT NOT NULL DEFAULT ''");
 addColumn("settings", "openai_key", "TEXT NOT NULL DEFAULT ''");
 addColumn("settings", "vision_model", "TEXT NOT NULL DEFAULT 'gpt-4o'");

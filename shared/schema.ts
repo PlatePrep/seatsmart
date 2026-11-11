@@ -69,6 +69,7 @@ export const reservations = sqliteTable("reservations", {
   outreachToken: text("outreach_token").notNull().default(""),
   optedOut: integer("opted_out", { mode: "boolean" }).notNull().default(false),
   noShowCharged: integer("no_show_charged").notNull().default(0), // cents
+  source: text("source").notNull().default("manual"), // manual | import
 });
 
 export const rules = sqliteTable("rules", {
