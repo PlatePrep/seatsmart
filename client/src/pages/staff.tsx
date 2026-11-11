@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import type { DiningTable, Reservation, Room, SeatingPlan, Server, Shift } from "@shared/schema";
 import { addDays, dateLabel, minToLabel, toMin } from "@shared/time";
@@ -13,7 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import { ChevronLeft, ChevronRight, Copy, Plus, Trash2, UserPlus, ArrowRightLeft, AlertTriangle } from "lucide-react";
+import { ChevronLeft, ChevronRight, Copy, Plus, Trash2, UserPlus, ArrowRightLeft, AlertTriangle, GripVertical } from "lucide-react";
 
 function autoSize(t: { shape: string; capacity: number }) {
   return t.shape === "rect" ? 11 : t.capacity >= 8 ? 9 : t.capacity >= 4 ? 7 : 6;
@@ -100,6 +100,47 @@ export default function Staff() {
     patchShift.mutate({ sid: active.id, body: { tableIds: (on ? [...cur, ...ids] : cur).sort((a, b) => a - b).join(",") } });
   };
 
+  // drag a table onto a server (shift card or drop chip). Moves it off any other server overlapping that shift.
+  const moveTable = async (tid: number, targetId: number) => {
+    const target = shifts.find((x) => x.id === targetId); if (!target) return;
+    const jobs: Promise<unknown>[] = [];
+    for (const o of shifts) {
+      if (o.id === target.id || !shiftTables(o).includes(tid)) continue;
+      const overlap = shiftStart(o) < shiftEnd(target) && shiftStart(target) < shiftEnd(o);
+      if (overlap) jobs.push(send("PATCH", `/api/shifts/${o.id}`, { tableIds: shiftTables(o).filter((x) => x !== tid).join(",") }));
+    }
+    if (!shiftTables(target).includes(tid)) jobs.push(send("PATCH", `/api/shifts/${target.id}`, { tableIds: [...shiftTables(target), tid].sort((a, b) => a - b).join(",") }));
+    try { await Promise.all(jobs); } catch (e) { onErr(e); }
+    refresh();
+    setActiveId(target.id);
+  };
+  const [drag, setDrag] = useState<{ tid: number; x: number; y: number; over: number | null } | null>(null);
+  const press = useRef<{ tid: number; x: number; y: number; moved: boolean } | null>(null);
+  const justDragged = useRef(false);
+  const dropUnder = (x: number, y: number) => {
+    const el = document.elementFromPoint(x, y)?.closest("[data-drop-shift]") as HTMLElement | null;
+    return el ? Number(el.dataset.dropShift) : null;
+  };
+  useEffect(() => {
+    const move = (e: PointerEvent) => {
+      const p = press.current; if (!p) return;
+      if (!p.moved && Math.hypot(e.clientX - p.x, e.clientY - p.y) < 6) return;
+      p.moved = true;
+      setDrag({ tid: p.tid, x: e.clientX, y: e.clientY, over: dropUnder(e.clientX, e.clientY) });
+    };
+    const up = (e: PointerEvent) => {
+      const p = press.current; press.current = null; if (!p) return;
+      if (p.moved) {
+        justDragged.current = true; setTimeout(() => (justDragged.current = false), 50);
+        const target = dropUnder(e.clientX, e.clientY);
+        setDrag(null);
+        if (target) moveTable(p.tid, target);
+      }
+    };
+    window.addEventListener("pointermove", move); window.addEventListener("pointerup", up); window.addEventListener("pointercancel", up);
+    return () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); window.removeEventListener("pointercancel", up); };
+  });
+
   const [roomId, setRoomId] = useState<number | null>(null);
   const room = rooms.find((r) => r.id === roomId) || rooms[0];
   const roomTables = tables.filter((x) => x.roomId === room?.id && x.active);
@@ -117,7 +158,7 @@ export default function Staff() {
 
   return (
     <div>
-      <PageHeader title="Servers & sections" sub="Add your wait staff, set who's working and when, then tap tables to give them to each server." />
+      <PageHeader title="Servers & sections" sub="Add your wait staff, set who's working and when, then drag tables onto each server." />
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <Button variant="outline" size="icon" onClick={() => setDate(addDays(date, -1))} aria-label="Previous day" data-testid="button-prev-day"><ChevronLeft className="h-4 w-4" /></Button>
         <Input type="date" value={date} onChange={(e) => e.target.value && setDate(e.target.value)} className="w-44" data-testid="input-date" />
@@ -160,8 +201,8 @@ export default function Staff() {
                 const who = sv(s.serverId);
                 const c = covers(s);
                 return (
-                  <li key={s.id} onClick={() => setActiveId(s.id)}
-                    className={cn("cursor-pointer px-4 py-3", activeId === s.id ? "bg-primary/5 ring-2 ring-inset ring-primary" : "hover:bg-muted/50")} data-testid={`shift-${s.id}`}>
+                  <li key={s.id} onClick={() => setActiveId(s.id)} data-drop-shift={s.id}
+                    className={cn("cursor-pointer px-4 py-3", drag?.over === s.id ? "bg-primary/15 ring-2 ring-inset ring-primary" : activeId === s.id ? "bg-primary/5 ring-2 ring-inset ring-primary" : "hover:bg-muted/50")} data-testid={`shift-${s.id}`}>
                     <div className="flex items-center gap-2">
                       <span className="h-3 w-3 shrink-0 rounded-full" style={{ background: who?.color || "#999" }} />
                       <Select value={String(s.serverId)} onValueChange={(v) => patchShift.mutate({ sid: s.id, body: { serverId: Number(v) } })}>
@@ -217,7 +258,20 @@ export default function Staff() {
               </span>
             )}
           </div>
-          {!active && shifts.length > 0 && <p className="mb-2 text-sm text-muted-foreground">Click a shift on the left, then tap tables to give them to that server.</p>}
+          {shifts.length > 0 && (
+            <div className="mb-2 flex flex-wrap items-center gap-2" data-testid="drop-chips">
+              <span className="text-xs text-muted-foreground">Drag a table onto a server:</span>
+              {shifts.map((s) => { const who = sv(s.serverId); return (
+                <div key={s.id} data-drop-shift={s.id} onClick={() => setActiveId(s.id)}
+                  className={cn("flex cursor-pointer items-center gap-1.5 rounded-full border-2 py-1 pl-1 pr-3 text-sm transition-all", drag?.over === s.id ? "scale-105 shadow-md" : drag ? "border-dashed" : "", activeId === s.id && !drag && "ring-2 ring-foreground ring-offset-1")}
+                  style={{ borderColor: who?.color, background: drag?.over === s.id ? `${who?.color}22` : undefined }} data-testid={`drop-shift-${s.id}`}>
+                  <span className="flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-bold text-white" style={{ background: who?.color }}>{nameInitials(who?.name || "")}</span>
+                  <span className="font-medium">{who?.name}</span>
+                  <span className="text-xs text-muted-foreground">{shiftLabel(s)} · {shiftTables(s).length}</span>
+                </div>); })}
+            </div>
+          )}
+          {!active && shifts.length > 0 && <p className="mb-2 text-sm text-muted-foreground">Drag tables onto a server above, or click a server and tap tables.</p>}
           <div className="overflow-x-auto rounded-lg border">
             <div style={{ aspectRatio: aspect }} className={cn("relative w-full min-w-[640px] select-none overflow-hidden bg-card", !hasImg && "bg-[repeating-linear-gradient(0deg,transparent,transparent_23px,hsl(var(--border)/.5)_24px),repeating-linear-gradient(90deg,transparent,transparent_23px,hsl(var(--border)/.5)_24px)]")} data-testid="canvas-staff">
               {hasImg && <img src={room!.imageData} alt={`${room!.name} floor plan`} draggable={false} className="pointer-events-none absolute inset-0 h-full w-full object-fill opacity-30" />}
@@ -229,9 +283,11 @@ export default function Staff() {
                 if (x.h) style.height = `${x.h}%`; else style.aspectRatio = x.shape === "rect" ? "2 / 1" : "1 / 1";
                 const shown = active ? (mine ? [active] : []) : owners;
                 return (
-                  <button key={x.id} type="button" onClick={() => toggleTable(x.id)} style={style}
+                  <button key={x.id} type="button" style={{ ...style, touchAction: "none" }}
+                    onPointerDown={(e) => { if (e.button === 0) press.current = { tid: x.id, x: e.clientX, y: e.clientY, moved: false }; }}
+                    onClick={() => { if (!justDragged.current) toggleTable(x.id); }}
                     title={`Table ${x.label}` + (owners.length ? "\n" + owners.map((s) => `${sv(s.serverId)?.name} ${shiftLabel(s)}`).join("\n") : " · no server")}
-                    className={cn("absolute flex overflow-hidden border-2 bg-card shadow-sm", x.shape === "round" ? "rounded-full" : "rounded-md",
+                    className={cn("absolute flex cursor-grab overflow-hidden border-2 bg-card shadow-sm active:cursor-grabbing", x.shape === "round" ? "rounded-full" : "rounded-md", drag?.tid === x.id && "opacity-40",
                       mine ? "border-foreground" : "border-foreground/40", active && !mine && owners.length > 0 && "opacity-70")}
                     data-testid={`stable-${x.id}`}>
                     {shown.length === 0 ? (
@@ -260,6 +316,10 @@ export default function Staff() {
           )}
         </div>
       </div>
+      {drag && (() => { const tb = tables.find((x) => x.id === drag.tid); const tgt = shifts.find((x) => x.id === drag.over); return (
+        <div className="pointer-events-none fixed z-50 flex items-center gap-1.5 rounded-md border-2 bg-card px-2.5 py-1.5 text-sm font-semibold shadow-lg" style={{ left: drag.x + 12, top: drag.y + 12, borderColor: tgt ? sv(tgt.serverId)?.color : undefined }} data-testid="drag-ghost">
+          <GripVertical className="h-3.5 w-3.5 text-muted-foreground" />Table {tb?.label}{tgt && <span className="font-normal text-muted-foreground">→ {sv(tgt.serverId)?.name}</span>}
+        </div>); })()}
     </div>
   );
 }
