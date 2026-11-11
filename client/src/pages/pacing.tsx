@@ -8,10 +8,11 @@ import { PageHeader, Pill, Empty } from "@/components/common";
 import { BlocksManager } from "@/components/blocks-manager";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useState } from "react";
 import { ChevronLeft, ChevronRight, Copy } from "lucide-react";
 
 type Risk = { level: "high" | "medium" | "low"; time: string; title: string; detail: string };
-type Hole = { startMin: number; time: string; partySize: number; tableId: number; table: string; area: string; room: string; mustLeaveBy: string };
+type Hole = { startMin: number; time: string; partySize: number; tableId: number; table: string; area: string; room: string; mustLeaveBy: string; nextBooked?: string };
 type Slot = { startMin: number; time: string; covers: number; parties: number; seated: number; seatsOpen: number; occupancy: number };
 type Pacing = {
   date: string; window: { start: string; last: string };
@@ -46,6 +47,11 @@ export default function PacingPage() {
     const txt = Array.from(groups.entries()).map(([t, hs]) => `${t}: ${hs.map((h) => `${h.partySize}-top (T${h.table}, ${h.room}${h.mustLeaveBy ? `, out by ${h.mustLeaveBy}` : ""})`).join("; ")}`).join("\n");
     navigator.clipboard?.writeText(`Open to sell ${dateLabel(date)}\n${txt}`).then(() => toast({ title: "Copied openings" }), () => toast({ title: "Copy failed", variant: "destructive" }));
   };
+  const [view, setView] = useState<"time" | "table">("time");
+  const byTable = new Map<number, Hole[]>();
+  for (const h of data?.holes || []) byTable.set(h.tableId, [...(byTable.get(h.tableId) || []), h]);
+  const tableRows = Array.from(byTable.values()).map((hs) => hs.sort((a, b) => a.startMin - b.startMin))
+    .sort((a, b) => a[0].table.localeCompare(b[0].table, undefined, { numeric: true }));
   const peak = data?.metrics.peak;
   const upcoming = booked.filter((b) => b.date !== date).slice(0, 8);
 
@@ -118,10 +124,34 @@ export default function PacingPage() {
 
             <section className="min-w-0 rounded-lg border bg-card" data-testid="section-holes">
               <div className="flex items-center justify-between gap-2 border-b px-4 py-2.5">
-                <h2 className="text-sm font-semibold">Open to sell ({data.holes.length} tables)</h2>
+                <h2 className="text-sm font-semibold">Open to sell ({data.holes.length} seatings on {byTable.size} tables)</h2>
+                <div className="ml-auto flex rounded-md border p-0.5 text-xs">
+                  {(["time", "table"] as const).map((v) => (
+                    <button key={v} onClick={() => setView(v)} className={`rounded px-2 py-1 ${view === v ? "bg-primary text-primary-foreground" : "text-muted-foreground"}`} data-testid={`toggle-holes-${v}`}>By {v}</button>
+                  ))}
+                </div>
                 {data.holes.length > 0 && <Button variant="ghost" size="sm" onClick={copyHoles} data-testid="button-copy-holes"><Copy className="mr-1 h-3.5 w-3.5" />Copy</Button>}
               </div>
               {data.holes.length === 0 ? <p className="p-4 text-sm text-muted-foreground">No sellable openings inside the pace cap.</p> : (
+                view === "table" ? (
+                <div className="max-h-[520px] overflow-auto">
+                  <table className="w-full text-sm">
+                    <thead className="sticky top-0 bg-card text-left text-xs uppercase tracking-wide text-muted-foreground">
+                      <tr className="border-b"><th className="px-3 py-2">Table</th><th className="px-3 py-2 text-right">Seats</th><th className="px-3 py-2">Open seatings</th><th className="px-3 py-2">Booked</th></tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {tableRows.map((hs) => (
+                        <tr key={hs[0].tableId} data-testid={`row-table-holes-${hs[0].table}`}>
+                          <td className="px-3 py-1.5 font-semibold">{hs[0].table}<div className="text-xs font-normal text-muted-foreground">{hs[0].room}</div></td>
+                          <td className="px-3 py-1.5 text-right tabular-nums">{hs[0].partySize}</td>
+                          <td className="px-3 py-1.5">{hs.map((h, k) => <div key={k} className="whitespace-nowrap"><span className="font-mono tabular-nums">{h.time}</span> <span className="text-muted-foreground">out by {h.mustLeaveBy || "end of night"}</span></div>)}</td>
+                          <td className="px-3 py-1.5 text-muted-foreground">{Array.from(new Set(hs.map((h) => h.nextBooked).filter(Boolean))).join(", ") || "—"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                ) : (
                 <div className="max-h-[520px] overflow-auto">
                   <table className="w-full text-sm">
                     <thead className="sticky top-0 bg-card text-left text-xs uppercase tracking-wide text-muted-foreground">
@@ -140,6 +170,7 @@ export default function PacingPage() {
                     </tbody>
                   </table>
                 </div>
+                )
               )}
             </section>
           </div>

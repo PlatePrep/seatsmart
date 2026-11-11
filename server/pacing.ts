@@ -3,7 +3,7 @@ import { minToLabel, toMin } from "@shared/time";
 import { blockedIntervals, effectivePreference, generatePlan, isBookable, turnFor, type Interval } from "./seating";
 
 export type Risk = { level: "high" | "medium" | "low"; time: string; title: string; detail: string };
-export type Hole = { startMin: number; time: string; partySize: number; tableId: number; table: string; area: string; room: string; mustLeaveBy: string };
+export type Hole = { startMin: number; time: string; partySize: number; tableId: number; table: string; area: string; room: string; mustLeaveBy: string; nextBooked: string };
 export type Slot = { startMin: number; time: string; covers: number; parties: number; seated: number; seatsOpen: number; occupancy: number };
 
 const ceil15 = (m: number) => Math.ceil(m / 15) * 15;
@@ -142,12 +142,19 @@ export function analyzePacing(date: string, tables: DiningTable[], rooms: Room[]
     for (const [gs, ge] of gaps) {
       const hasNext = ge < close;
       let tt = ceil15(gs === start ? gs : gs + r.resetMin);
+      const inGap: Hole[] = [];
       while (tt <= last && tt + turn + (hasNext ? r.resetMin : 0) <= ge) {
         if ((load.get(tt) ?? 0) + t.capacity > cap) { tt += 15; continue; }
         load.set(tt, (load.get(tt) ?? 0) + t.capacity);
-        holes.push({ startMin: tt, time: minToLabel(tt), partySize: t.capacity, tableId: t.id, table: t.label, area: t.area, room: roomName.get(t.roomId) || AREA[t.area], mustLeaveBy: hasNext ? minToLabel(ge - r.resetMin) : "" });
+        inGap.push({ startMin: tt, time: minToLabel(tt), partySize: t.capacity, tableId: t.id, table: t.label, area: t.area, room: roomName.get(t.roomId) || AREA[t.area], mustLeaveBy: "", nextBooked: hasNext ? minToLabel(ge) : "" });
         tt = ceil15(tt + turn + r.resetMin);
       }
+      // each seating must clear for whatever comes next: the next sellable seating on this table, or the booked party
+      inGap.forEach((h, k) => {
+        const nxt = inGap[k + 1];
+        h.mustLeaveBy = nxt ? minToLabel(nxt.startMin - r.resetMin) : hasNext ? minToLabel(ge - r.resetMin) : "";
+        holes.push(h);
+      });
     }
   }
   holes.sort((a, b) => a.startMin - b.startMin || areaRank[a.area] - areaRank[b.area] || b.partySize - a.partySize);
