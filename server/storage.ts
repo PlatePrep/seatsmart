@@ -2,7 +2,7 @@ import { drizzle } from "drizzle-orm/better-sqlite3";
 import Database from "better-sqlite3";
 import { and, eq, inArray, lte, asc, desc } from "drizzle-orm";
 import {
-  locations, diningTables, rooms, blocks, type Block, type Room, type InsertRoom, reservations, rules, settings, calls, campaignSteps, outreachEvents,
+  locations, diningTables, rooms, blocks, servers, shifts, type Server, type Shift, type Block, type Room, type InsertRoom, reservations, rules, settings, calls, campaignSteps, outreachEvents,
   type Location, type InsertLocation, type DiningTable, type InsertDiningTable,
   type Reservation, type InsertReservation, type Rules, type Settings, type Call,
   type CampaignStep, type OutreachEvent,
@@ -63,6 +63,13 @@ CREATE TABLE IF NOT EXISTS blocks (
   id INTEGER PRIMARY KEY AUTOINCREMENT, location_id INTEGER NOT NULL, date TEXT NOT NULL,
   room_id INTEGER NOT NULL DEFAULT 0, table_id INTEGER NOT NULL DEFAULT 0, start_time TEXT NOT NULL DEFAULT '',
   end_time TEXT NOT NULL DEFAULT '', kind TEXT NOT NULL DEFAULT 'walkin', note TEXT NOT NULL DEFAULT '');
+CREATE TABLE IF NOT EXISTS servers (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, location_id INTEGER NOT NULL, name TEXT NOT NULL,
+  color TEXT NOT NULL DEFAULT '', active INTEGER NOT NULL DEFAULT 1);
+CREATE TABLE IF NOT EXISTS shifts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, location_id INTEGER NOT NULL, date TEXT NOT NULL, server_id INTEGER NOT NULL,
+  start_time TEXT NOT NULL, end_time TEXT NOT NULL DEFAULT '', table_ids TEXT NOT NULL DEFAULT '');
+CREATE INDEX IF NOT EXISTS idx_shifts_loc_date ON shifts(location_id, date);
 CREATE INDEX IF NOT EXISTS idx_res_loc_date ON reservations(location_id, date);
 CREATE INDEX IF NOT EXISTS idx_steps_due ON campaign_steps(status, send_at);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_res_token ON reservations(outreach_token) WHERE outreach_token <> '';
@@ -111,6 +118,19 @@ export const storage = {
     db.delete(diningTables).where(eq(diningTables.roomId, id)).run();
     return db.delete(rooms).where(eq(rooms.id, id)).run();
   },
+
+  // wait staff
+  listServers: (locationId: number): Server[] =>
+    db.select().from(servers).where(and(eq(servers.locationId, locationId), eq(servers.active, true))).orderBy(asc(servers.name)).all(),
+  getServer: (id: number) => db.select().from(servers).where(eq(servers.id, id)).get(),
+  createServer: (data: Omit<Server, "id">) => db.insert(servers).values(data).returning().get(),
+  updateServer: (id: number, data: Partial<Omit<Server, "id">>) => db.update(servers).set(data).where(eq(servers.id, id)).returning().get(),
+  listShifts: (locationId: number, date: string): Shift[] =>
+    db.select().from(shifts).where(and(eq(shifts.locationId, locationId), eq(shifts.date, date))).orderBy(asc(shifts.startTime), asc(shifts.id)).all(),
+  getShift: (id: number) => db.select().from(shifts).where(eq(shifts.id, id)).get(),
+  createShift: (data: Omit<Shift, "id">) => db.insert(shifts).values(data).returning().get(),
+  updateShift: (id: number, data: Partial<Omit<Shift, "id">>) => db.update(shifts).set(data).where(eq(shifts.id, id)).returning().get(),
+  deleteShift: (id: number) => db.delete(shifts).where(eq(shifts.id, id)).run(),
 
   // blocks
   listBlocks: (locationId: number, date: string): Block[] =>

@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import type { Server, Shift } from "@shared/schema";
+import { nameInitials, serverFor, shiftFor, shiftTables } from "@shared/staff";
 import type { Block, DiningTable, Reservation, Room, SeatingPlan, SeatAssignment } from "@shared/schema";
 import { addDays, dateLabel, localToday, minToLabel, toMin } from "@shared/time";
 import { useApp } from "@/lib/app-context";
@@ -48,6 +50,8 @@ export default function FloorView() {
     queryKey: ["/api/locations", locationId, "plan", date],
     queryFn: () => send("POST", `/api/locations/${locationId}/plan/generate`, { date }), enabled,
   });
+  const { data: servers = [] } = useQuery<Server[]>({ queryKey: ["/api/locations", locationId, "servers"], enabled });
+  const { data: shifts = [] } = useQuery<Shift[]>({ queryKey: ["/api/locations", locationId, "shifts", date], queryFn: () => getJson(`/api/locations/${locationId}/shifts?date=${date}`), enabled });
   const [cushion, setCushion] = useState(false);
   const [allTimes, setAllTimes] = useState(false);
   const plan = plans ? (cushion ? plans.cushion : plans.standard) : null;
@@ -205,9 +209,10 @@ export default function FloorView() {
                   </button>
                 );
               }
+              const srv = serverFor(shifts, servers, x.id, s.a ? s.a.startMin : t); // seated party keeps the server who greeted it
               return (
                 <button key={x.id} type="button" onClick={() => setSel(x.id)} style={style}
-                  title={s.res ? `${s.res.guestName} (${s.res.partySize}) ${minToLabel(s.a!.startMin)}–${minToLabel(s.a!.endMin)} · table ${s.a!.labels}` : s.next ? `Next: ${s.next.res?.guestName} at ${minToLabel(s.next.a.startMin)}` : `Table ${x.label}`}
+                  title={(srv ? `Server: ${srv.name}\n` : "") + (s.res ? `${s.res.guestName} (${s.res.partySize}) ${minToLabel(s.a!.startMin)}–${minToLabel(s.a!.endMin)} · table ${s.a!.labels}` : s.next ? `Next: ${s.next.res?.guestName} at ${minToLabel(s.next.a.startMin)}` : `Table ${x.label}`)}
                   className={cn("absolute flex flex-col items-center justify-center overflow-hidden border-2 px-0.5 text-center leading-[1.05] shadow-sm transition-colors",
                     STYLE[s.kind], x.shape === "round" ? "rounded-full" : "rounded-md", s.res?.birthday && "ring-2 ring-[hsl(45_90%_50%)]", s.a?.conflict && "ring-2 ring-destructive", sel === x.id && "ring-2 ring-foreground ring-offset-2")}
                   data-testid={`ftable-${x.id}`}>
@@ -221,6 +226,7 @@ export default function FloorView() {
                     <span className="text-[9px] font-semibold text-primary">{initials(s.next.res?.guestName || "")} {minToLabel(s.next.a.startMin).replace(/ ?[AP]M/, "")}</span>
                   ) : s.kind === "walkin" ? <span className="text-[8px] font-semibold uppercase">walk-in</span>
                     : <span className="text-[10px] opacity-60">{x.capacity}</span>}
+                  {srv && <span className="absolute inset-x-0 bottom-0 h-1" style={{ background: srv.color }} aria-hidden />}
                 </button>
               );
             })}
@@ -249,9 +255,32 @@ export default function FloorView() {
           </section>
           )}
 
+          {!allTimes && shifts.length > 0 && (() => {
+            const on = shifts.filter((sh) => shiftTables(sh).some((tid) => shiftFor(shifts, tid, t)?.id === sh.id));
+            return (
+              <section className="rounded-lg border bg-card" data-testid="panel-servers">
+                <div className="border-b px-4 py-2.5 text-sm font-semibold">Servers on at {minToLabel(t)} ({on.length})</div>
+                <ul className="divide-y text-sm">
+                  {on.length === 0 && <li className="px-4 py-2 text-muted-foreground">No one on the floor.</li>}
+                  {on.map((sh) => {
+                    const sv = servers.find((x) => x.id === sh.serverId);
+                    const mine = shiftTables(sh).filter((tid) => shiftFor(shifts, tid, t)?.id === sh.id);
+                    const seated = (plan?.assignments || []).filter((a) => a.startMin <= t && a.endMin > t && mine.includes(a.tableIds[0]));
+                    const cv = seated.reduce((n, a) => n + (byId.get(a.reservationId)?.partySize || 0), 0);
+                    return (
+                      <li key={sh.id} className="flex items-center gap-2 px-4 py-1.5">
+                        <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[9px] font-bold text-white" style={{ background: sv?.color }}>{nameInitials(sv?.name || "")}</span>
+                        <span className="min-w-0 flex-1"><span className="block truncate">{sv?.name}</span><span className="block text-xs text-muted-foreground">{mine.length} tables · {seated.length} parties · {cv} covers seated</span></span>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </section>
+            );
+          })()}
           {selTable && selState && (
             <section className="rounded-lg border bg-card p-4" data-testid="panel-table">
-              <div className="flex items-center justify-between"><h2 className="text-sm font-semibold">Table {selTable.label} · {selTable.capacity} seats</h2>
+              <div className="flex items-center justify-between"><h2 className="text-sm font-semibold">Table {selTable.label} · {selTable.capacity} seats{!allTimes && serverFor(shifts, servers, selTable.id, t) && <span className="ml-1.5 font-normal" style={{ color: serverFor(shifts, servers, selTable.id, t)!.color }}>· {serverFor(shifts, servers, selTable.id, t)!.name}</span>}</h2>
                 <button className="text-xs text-muted-foreground hover:underline" onClick={() => setSel(null)}>Close</button></div>
               {allTimes ? null : selState.res ? (
                 <div className="mt-2 text-sm">
@@ -270,7 +299,7 @@ export default function FloorView() {
                 {(plan?.assignments || []).filter((a) => a.tableIds.includes(selTable.id)).sort((a, b) => a.startMin - b.startMin).map((a) => (
                   <div key={a.reservationId} className={cn("flex justify-between text-xs", !allTimes && a.startMin <= t && a.endMin > t && "font-semibold")}>
                     <span className="flex items-center gap-1">{allTimes && <span className="h-2.5 w-2.5 rounded-sm" style={{ background: hourColor(a.startMin)[0] }} />}{minToLabel(a.startMin)}–{minToLabel(a.endMin)}</span>
-                    <button className="hover:underline" onClick={() => setEditId(a.reservationId)} title="Change table">{byId.get(a.reservationId)?.guestName} ({byId.get(a.reservationId)?.partySize})</button>
+                    <button className="hover:underline" onClick={() => setEditId(a.reservationId)} title="Change table">{byId.get(a.reservationId)?.guestName} ({byId.get(a.reservationId)?.partySize}){(() => { const sv = serverFor(shifts, servers, selTable.id, a.startMin); return sv ? <span className="ml-1" style={{ color: sv.color }}>· {nameInitials(sv.name)}</span> : null; })()}</button>
                   </div>
                 ))}
               </div>

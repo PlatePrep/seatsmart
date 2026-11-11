@@ -11,6 +11,7 @@ import Dashboard from "@/pages/dashboard";
 import Reservations from "@/pages/reservations";
 import Plan from "@/pages/plan";
 import PacingPage from "@/pages/pacing";
+import Staff from "@/pages/staff";
 import FloorView from "@/pages/floor-view";
 import FloorPlan from "@/pages/floor";
 import Confirmations from "@/pages/confirmations";
@@ -32,6 +33,7 @@ function HostApp() {
           <Route path="/plan" component={Plan} />
           <Route path="/pacing" component={PacingPage} />
           <Route path="/floor-view" component={FloorView} />
+          <Route path="/staff" component={Staff} />
           <Route path="/floor-plan" component={FloorPlan} />
           <Route path="/confirmations" component={Confirmations} />
           <Route path="/calls" component={Calls} />

@@ -1,5 +1,6 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
-import type { Reservation, SeatingPlan } from "@shared/schema";
+import type { Reservation, SeatingPlan, Server, Shift } from "@shared/schema";
+import { serverFor } from "@shared/staff";
 import { addDays, dateLabel, minToLabel } from "@shared/time";
 import { useApp } from "@/lib/app-context";
 import { errMsg, getJson, invalidateLocation, send } from "@/lib/api";
@@ -13,7 +14,7 @@ import { ChevronLeft, ChevronRight, Printer, PhoneCall, RefreshCw, Pencil, Lock 
 import { useState } from "react";
 import { AssignTableDialog } from "@/components/assign-table";
 
-function PlanTable({ title, plan, byId, onOffer, onEdit, testId }: { title: string; plan: SeatingPlan; byId: Map<number, Reservation>; onOffer: (id: number) => void; onEdit: (id: number, plan: SeatingPlan) => void; testId: string }) {
+function PlanTable({ title, plan, byId, onOffer, onEdit, testId, servers = [], shifts = [] }: { servers?: Server[]; shifts?: Shift[]; title: string; plan: SeatingPlan; byId: Map<number, Reservation>; onOffer: (id: number) => void; onEdit: (id: number, plan: SeatingPlan) => void; testId: string }) {
   const patio = plan.assignments.filter((a) => a.area === "patio").length;
   const ballroom = plan.assignments.filter((a) => a.area === "ballroom").length;
   return (
@@ -30,7 +31,7 @@ function PlanTable({ title, plan, byId, onOffer, onEdit, testId }: { title: stri
       <div className="overflow-x-auto">
         <table className="w-full min-w-[520px] text-sm">
           <thead className="text-left text-xs uppercase tracking-wide text-muted-foreground">
-            <tr className="border-b"><th className="px-3 py-2">Time</th><th className="px-3 py-2">Guest</th><th className="px-3 py-2 text-right">Party</th><th className="px-3 py-2">Table</th><th className="px-3 py-2">Why</th><th className="print:hidden" /></tr>
+            <tr className="border-b"><th className="px-3 py-2">Time</th><th className="px-3 py-2">Guest</th><th className="px-3 py-2 text-right">Party</th><th className="px-3 py-2">Table</th>{shifts.length > 0 && <th className="px-3 py-2">Server</th>}<th className="px-3 py-2">Why</th><th className="print:hidden" /></tr>
           </thead>
           <tbody className="divide-y">
             {plan.assignments.map((a) => {
@@ -42,6 +43,7 @@ function PlanTable({ title, plan, byId, onOffer, onEdit, testId }: { title: stri
                   <td className="px-3 py-2 font-medium">{r.guestName}{r.birthday && <span className="ml-1 text-xs font-normal">(birthday)</span>}</td>
                   <td className="px-3 py-2 text-right tabular-nums">{r.partySize}</td>
                   <td className="whitespace-nowrap px-3 py-2 font-semibold">{a.manual && <Lock className="mr-1 inline h-3 w-3" aria-label="Locked by host" />}{a.labels}{a.area === "patio" && <span className="ml-1 text-xs font-normal">patio</span>}</td>
+                  {shifts.length > 0 && (() => { const sv = serverFor(shifts, servers, a.tableIds[0], a.startMin); return <td className="whitespace-nowrap px-3 py-2 text-xs font-medium" style={{ color: sv?.color }} data-testid={`text-server-${r.id}`}>{sv?.name || <span className="text-destructive">None</span>}</td>; })()}
                   <td className={cn("px-3 py-2 text-xs", a.conflict ? "font-medium text-destructive" : "text-muted-foreground")}>{a.reason}</td>
                   <td className="whitespace-nowrap px-2 py-1 print:hidden">
                     <Button variant="ghost" size="sm" onClick={() => onEdit(r.id, plan)} data-testid={`button-edit-table-${testId}-${r.id}`} title="Change table"><Pencil className="h-3.5 w-3.5" /></Button>
@@ -73,6 +75,8 @@ export default function Plan() {
     queryFn: () => getJson(`/api/locations/${locationId}/reservations?date=${date}`), enabled: !!locationId,
   });
   const { data: rules } = useQuery<any>({ queryKey: ["/api/locations", locationId, "rules"], enabled: !!locationId });
+  const { data: servers = [] } = useQuery<Server[]>({ queryKey: ["/api/locations", locationId, "servers"], enabled: !!locationId });
+  const { data: shifts = [] } = useQuery<Shift[]>({ queryKey: ["/api/locations", locationId, "shifts", date], queryFn: () => getJson(`/api/locations/${locationId}/shifts?date=${date}`), enabled: !!locationId });
   const { data, isFetching, refetch } = useQuery<{ standard: SeatingPlan; cushion: SeatingPlan }>({
     queryKey: ["/api/locations", locationId, "plan", date],
     queryFn: () => send("POST", `/api/locations/${locationId}/plan/generate`, { date }), enabled: !!locationId,
@@ -107,8 +111,8 @@ export default function Plan() {
         <Empty title="No reservations to seat on this day" />
       ) : (
         <div className="grid gap-5 2xl:grid-cols-2">
-          <PlanTable title="Standard turns" plan={data.standard} byId={byId} onOffer={(id) => offer.mutate(id)} onEdit={(id, p) => setEdit({ id, plan: p })} testId="standard" />
-          <PlanTable title={`With +${data.cushion.cushion} min cushion`} plan={data.cushion} byId={byId} onOffer={(id) => offer.mutate(id)} onEdit={(id, p) => setEdit({ id, plan: p })} testId="cushion" />
+          <PlanTable title="Standard turns" plan={data.standard} byId={byId} onOffer={(id) => offer.mutate(id)} onEdit={(id, p) => setEdit({ id, plan: p })} testId="standard" servers={servers} shifts={shifts} />
+          <PlanTable title={`With +${data.cushion.cushion} min cushion`} plan={data.cushion} byId={byId} onOffer={(id) => offer.mutate(id)} onEdit={(id, p) => setEdit({ id, plan: p })} testId="cushion" servers={servers} shifts={shifts} />
         </div>
       )}
       {locationId && <AssignTableDialog locationId={locationId} reservation={edit ? byId.get(edit.id) || null : null} plan={edit?.plan} open={!!edit} onOpenChange={(v) => !v && setEdit(null)} />}

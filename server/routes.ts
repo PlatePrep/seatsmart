@@ -295,6 +295,56 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     res.json(Array.from(m.entries()).map(([date, v]) => ({ date, ...v })).sort((a, b) => a.date.localeCompare(b.date)));
   });
 
+  // ---------- wait staff + shifts ----------
+  const PALETTE = ["#0f766e", "#b45309", "#7c3aed", "#be123c", "#1d4ed8", "#15803d", "#c2410c", "#a21caf", "#0369a1", "#4d7c0f", "#9f1239", "#475569"];
+  app.get("/api/locations/:id/servers", (req, res) => res.json(storage.listServers(id(req))));
+  app.post("/api/locations/:id/servers", (req, res) => {
+    const b = z.object({ name: z.string().trim().min(1, "Enter a name").max(40), color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional() }).safeParse(req.body);
+    if (!b.success) return res.status(400).json({ message: b.error.issues[0]?.message || "Invalid server" });
+    const used = new Set(storage.listServers(id(req)).map((x) => x.color));
+    const color = b.data.color || PALETTE.find((c) => !used.has(c)) || PALETTE[used.size % PALETTE.length];
+    res.json(storage.createServer({ locationId: id(req), name: b.data.name, color, active: true }));
+  });
+  app.patch("/api/servers/:id", (req, res) => {
+    const b = z.object({ name: z.string().trim().min(1).max(40).optional(), color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional() }).safeParse(req.body);
+    if (!b.success) return res.status(400).json({ message: b.error.issues[0]?.message || "Invalid server" });
+    res.json(storage.updateServer(id(req), b.data));
+  });
+  app.delete("/api/servers/:id", (req, res) => { storage.updateServer(id(req), { active: false }); res.json({ ok: true }); });
+
+  const hm = z.string().regex(/^\d{2}:\d{2}$/);
+  const shiftBody = z.object({
+    serverId: z.coerce.number().int().positive("Pick a server"), startTime: hm, endTime: z.union([hm, z.literal("")]).default(""),
+    tableIds: z.string().regex(/^(\d+(,\d+)*)?$/).default(""),
+  });
+  app.get("/api/locations/:id/shifts", (req, res) => res.json(storage.listShifts(id(req), String(req.query.date || localToday()))));
+  app.post("/api/locations/:id/shifts", (req, res) => {
+    const b = shiftBody.extend({ date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/) }).safeParse(req.body);
+    if (!b.success) return res.status(400).json({ message: b.error.issues[0]?.message || "Invalid shift" });
+    if (b.data.endTime && b.data.endTime <= b.data.startTime) return res.status(400).json({ message: "End time must be after start time" });
+    res.json(storage.createShift({ locationId: id(req), ...b.data }));
+  });
+  app.patch("/api/shifts/:id", (req, res) => {
+    const b = shiftBody.partial().safeParse(req.body);
+    if (!b.success) return res.status(400).json({ message: b.error.issues[0]?.message || "Invalid shift" });
+    const cur = storage.getShift(id(req)); if (!cur) return res.status(404).json({ message: "Shift not found" });
+    const st = b.data.startTime ?? cur.startTime, en = b.data.endTime ?? cur.endTime;
+    if (en && en <= st) return res.status(400).json({ message: "End time must be after start time" });
+    res.json(storage.updateShift(id(req), b.data));
+  });
+  app.delete("/api/shifts/:id", (req, res) => { storage.deleteShift(id(req)); res.json({ ok: true }); });
+  app.post("/api/locations/:id/shifts/copy", (req, res) => {
+    const d = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+    const b = z.object({ from: d, to: d }).safeParse(req.body);
+    if (!b.success) return res.status(400).json({ message: "Invalid dates" });
+    const live = new Set(storage.listServers(id(req)).map((x) => x.id));
+    const src = storage.listShifts(id(req), b.data.from).filter((x) => live.has(x.serverId));
+    if (!src.length) return res.status(400).json({ message: "No shifts on that day to copy" });
+    for (const x of storage.listShifts(id(req), b.data.to)) storage.deleteShift(x.id);
+    for (const x of src) storage.createShift({ locationId: id(req), date: b.data.to, serverId: x.serverId, startTime: x.startTime, endTime: x.endTime, tableIds: x.tableIds });
+    res.json({ copied: src.length });
+  });
+
   // ---------- blocks (hold tables/rooms for walk-ins or close them) ----------
   app.get("/api/locations/:id/blocks", (req, res) => res.json(storage.listBlocks(id(req), String(req.query.date || localToday()))));
   app.post("/api/locations/:id/blocks", (req, res) => {

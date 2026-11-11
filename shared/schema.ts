@@ -121,6 +121,24 @@ export const settings = sqliteTable("settings", {
   visionModel: text("vision_model").notNull().default("gpt-4o"),
 });
 
+// Wait staff roster and per-date shifts (server covers a set of tables from start to end)
+export const servers = sqliteTable("servers", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  locationId: integer("location_id").notNull(),
+  name: text("name").notNull(),
+  color: text("color").notNull().default(""),
+  active: integer("active", { mode: "boolean" }).notNull().default(true),
+});
+export const shifts = sqliteTable("shifts", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  locationId: integer("location_id").notNull(),
+  date: text("date").notNull(),
+  serverId: integer("server_id").notNull(),
+  startTime: text("start_time").notNull(), // HH:MM
+  endTime: text("end_time").notNull().default(""), // "" = until close
+  tableIds: text("table_ids").notNull().default(""), // comma-separated
+});
+
 // Per-date blocks on a table or a whole room. kind: walkin (held for walk-ins) | closed
 export const blocks = sqliteTable("blocks", {
   id: integer("id").primaryKey({ autoIncrement: true }),
@@ -192,6 +210,8 @@ export type Location = typeof locations.$inferSelect;
 export type InsertLocation = z.infer<typeof insertLocationSchema>;
 export type Room = typeof rooms.$inferSelect;
 export type Block = typeof blocks.$inferSelect;
+export type Server = typeof servers.$inferSelect;
+export type Shift = typeof shifts.$inferSelect;
 export type InsertRoom = z.infer<typeof insertRoomSchema>;
 export type DiningTable = typeof diningTables.$inferSelect;
 export type InsertDiningTable = z.infer<typeof insertTableSchema>;
