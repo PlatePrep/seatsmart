@@ -120,6 +120,7 @@ export const settings = sqliteTable("settings", {
   publicBaseUrl: text("public_base_url").notNull().default(""),
   openaiKey: text("openai_key").notNull().default(""),
   visionModel: text("vision_model").notNull().default("gpt-4o"),
+  assistantModel: text("assistant_model").notNull().default("gpt-4.1"),
 });
 
 // Wait staff roster and per-date shifts (server covers a set of tables from start to end)

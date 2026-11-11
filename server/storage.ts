@@ -8,7 +8,7 @@ import {
   type CampaignStep, type OutreachEvent,
 } from "@shared/schema";
 
-const sqlite = new Database(process.env.SEATSMART_DB || "data.db");
+export const sqlite = new Database(process.env.SEATSMART_DB || "data.db");
 sqlite.pragma("journal_mode = WAL");
 
 // Additive schema creation (never drops). New columns go through addColumn().
@@ -69,6 +69,10 @@ CREATE TABLE IF NOT EXISTS servers (
 CREATE TABLE IF NOT EXISTS shifts (
   id INTEGER PRIMARY KEY AUTOINCREMENT, location_id INTEGER NOT NULL, date TEXT NOT NULL, server_id INTEGER NOT NULL,
   start_time TEXT NOT NULL, end_time TEXT NOT NULL DEFAULT '', table_ids TEXT NOT NULL DEFAULT '');
+CREATE TABLE IF NOT EXISTS pacing_overrides (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, location_id INTEGER NOT NULL, date TEXT NOT NULL,
+  pacing_covers INTEGER NOT NULL, note TEXT NOT NULL DEFAULT '');
+CREATE UNIQUE INDEX IF NOT EXISTS idx_pace_loc_date ON pacing_overrides(location_id, date);
 CREATE INDEX IF NOT EXISTS idx_shifts_loc_date ON shifts(location_id, date);
 CREATE INDEX IF NOT EXISTS idx_res_loc_date ON reservations(location_id, date);
 CREATE INDEX IF NOT EXISTS idx_steps_due ON campaign_steps(status, send_at);
@@ -88,6 +92,7 @@ addColumn("rules", "avg_spend_cents", "INTEGER NOT NULL DEFAULT 7500");
 addColumn("rules", "reset_min", "INTEGER NOT NULL DEFAULT 10");
 addColumn("rules", "use_ballroom", "INTEGER NOT NULL DEFAULT 1");
 addColumn("rules", "service_start", "TEXT NOT NULL DEFAULT ''");
+addColumn("settings", "assistant_model", "TEXT NOT NULL DEFAULT 'gpt-4.1'");
 {
   const cols = sqlite.prepare(`PRAGMA table_info(reservations)`).all() as { name: string }[];
   if (!cols.some((c) => c.name === "source")) {
@@ -102,7 +107,27 @@ addColumn("settings", "vision_model", "TEXT NOT NULL DEFAULT 'gpt-4o'");
 export const db = drizzle(sqlite);
 export const rawDb = sqlite;
 
+export type PacingOverride = { id: number; locationId: number; date: string; pacingCovers: number; note: string };
+const paceRow = (r: any): PacingOverride => ({ id: r.id, locationId: r.location_id, date: r.date, pacingCovers: r.pacing_covers, note: r.note });
 export const storage = {
+  // pacing by date (overrides the Rules pace cap for one day)
+  listPacingOverrides: (locationId: number): PacingOverride[] =>
+    (sqlite.prepare(`SELECT * FROM pacing_overrides WHERE location_id = ? ORDER BY date`).all(locationId) as any[]).map(paceRow),
+  getPacingOverride: (locationId: number, date: string): PacingOverride | undefined => {
+    const r = sqlite.prepare(`SELECT * FROM pacing_overrides WHERE location_id = ? AND date = ?`).get(locationId, date);
+    return r ? paceRow(r) : undefined;
+  },
+  setPacingOverride: (locationId: number, date: string, pacingCovers: number, note = "") => {
+    sqlite.prepare(`INSERT INTO pacing_overrides (location_id, date, pacing_covers, note) VALUES (?,?,?,?)
+      ON CONFLICT(location_id, date) DO UPDATE SET pacing_covers = excluded.pacing_covers, note = excluded.note`).run(locationId, date, pacingCovers, note);
+  },
+  deletePacingOverride: (locationId: number, date: string) => { sqlite.prepare(`DELETE FROM pacing_overrides WHERE location_id = ? AND date = ?`).run(locationId, date); },
+  /** Rules for one date: the location's rules with that day's pacing override applied. */
+  rulesFor: (locationId: number, date: string): Rules => {
+    const r = storage.getRules(locationId);
+    const o = storage.getPacingOverride(locationId, date);
+    return o ? { ...r, pacingCovers: o.pacingCovers } : r;
+  },
   // locations
   listLocations: (): Location[] => db.select().from(locations).orderBy(asc(locations.id)).all(),
   getLocation: (id: number) => db.select().from(locations).where(eq(locations.id, id)).get(),

@@ -17,6 +17,9 @@ import { seedIfEmpty } from "./seed";
 import { detectTables } from "./vision";
 import { setupAgents } from "./synthflow-setup";
 import { toMin } from "@shared/time";
+import { sqlite } from "./storage";
+import { runAssistant, applyActions, type ApiCall } from "./assistant";
+import { saveVersion, listVersions, getVersion, restoreVersion, diffVersion, renameVersion } from "./versions";
 
 const id = (req: Request, k = "id") => Number(req.params[k]);
 const SECRET_FIELDS = ["synthflowKey", "stripeSecretKey", "stripeWebhookSecret", "twilioToken", "resendKey", "openaiKey"] as const;
@@ -67,6 +70,97 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   startScheduler();
 
   app.post("/api/client-origin", (req, res) => { setClientOrigin(String(req.body?.origin || "")); res.json({ ok: true }); });
+
+  // ---------- version history: snapshot before host changes (throttled; identical states are skipped) ----------
+  const RES_TABLE: Record<string, string> = { reservations: "reservations", tables: "dining_tables", rooms: "rooms", shifts: "shifts", servers: "servers", blocks: "blocks" };
+  const NO_SNAPSHOT = /^\/api\/(auth|portal|webhooks|client-origin)|\/(test\/|settings|synthflow|detect|versions|assistant|simulate-reply|resend|preview-messages|call-offer-inside|no-show-charge)/;
+  const locationOf = (path: string): number | null => {
+    let m = path.match(/^\/api\/locations\/(\d+)/);
+    if (m) return Number(m[1]);
+    m = path.match(/^\/api\/(reservations|tables|rooms|shifts|servers|blocks)\/(\d+)/);
+    if (m) { const row = sqlite.prepare(`SELECT location_id FROM ${RES_TABLE[m[1]]} WHERE id = ?`).get(Number(m[2])) as any; return row?.location_id ?? null; }
+    return null;
+  };
+  app.use((req, _res, next) => {
+    if (req.method === "GET" || !req.path.startsWith("/api/") || NO_SNAPSHOT.test(req.path) || req.path === "/api/locations") return next();
+    try { const loc = locationOf(req.path); if (loc) { const d = describeChange(req.method, req.path, req.body); saveVersion(loc, d.label, d.important ? "system" : "auto"); } } catch { /* never block a change */ }
+    next();
+  });
+  function describeChange(method: string, path: string, body: any): { label: string; important: boolean } {
+    const p = path.replace(/^\/api\//, "");
+    const row = (t: string, n: string) => sqlite.prepare(`SELECT * FROM ${t} WHERE id = ?`).get(Number(n)) as any;
+    let m: RegExpMatchArray | null;
+    if (/reservations\/import$/.test(p)) return { label: "Before reservation file upload", important: true };
+    if (/rooms\/\d+\/tables$/.test(p)) return { label: "Before saving floor-plan tables", important: true };
+    if (/\/rules$/.test(p)) return { label: "Before changing rules", important: true };
+    if (/shifts\/copy$/.test(p)) return { label: "Before copying shifts", important: true };
+    if (/pacing-overrides\/([\d-]+)$/.test(p)) return { label: `Before changing pacing for ${p.split("/").pop()}`, important: true };
+    if ((m = p.match(/^reservations\/(\d+)$/))) { const r = row("reservations", m[1]); const who = r ? `${r.guest_name} (${r.party_size})` : "a reservation";
+      return { label: method === "DELETE" ? `Before deleting ${who}` : body?.status === "cancelled" ? `Before cancelling ${who}` : `Before editing ${who}`, important: method === "DELETE" }; }
+    if ((m = p.match(/^tables\/(\d+)$/))) { const t = row("dining_tables", m[1]); return { label: `${method === "DELETE" ? "Before deleting" : "Before editing"} table ${t?.label ?? ""}`.trim(), important: method === "DELETE" }; }
+    if ((m = p.match(/^rooms\/(\d+)$/))) { const r = row("rooms", m[1]); return { label: `${method === "DELETE" ? "Before deleting room" : "Before editing room"} ${r?.name ?? ""}`.trim(), important: method === "DELETE" }; }
+    if (/\/reservations$/.test(p)) return { label: `Before adding ${body?.guestName || "a reservation"}`, important: false };
+    if (/\/blocks$|^blocks\//.test(p)) return { label: method === "DELETE" ? "Before removing a block" : "Before adding a block", important: false };
+    if (/shifts|servers/.test(p)) return { label: "Before changing servers or shifts", important: false };
+    if (/tables\/add$|\/rooms$/.test(p)) return { label: "Before changing the floor plan", important: false };
+    return { label: "Before a change", important: false };
+  }
+  app.get("/api/locations/:id/versions", (req, res) => res.json(listVersions(id(req))));
+  app.post("/api/locations/:id/versions", (req, res) => {
+    const label = String(req.body?.label || "").trim() || "Saved version";
+    const v = saveVersion(id(req), label, "manual");
+    res.json(v || listVersions(id(req))[0]);
+  });
+  app.get("/api/versions/:id/diff", (req, res) => { const d = diffVersion(id(req)); d ? res.json(d) : res.status(404).json({ message: "Version not found" }); });
+  app.patch("/api/versions/:id", (req, res) => { renameVersion(id(req), String(req.body?.label || "").trim() || "Saved version"); res.json({ ok: true }); });
+  app.post("/api/versions/:id/restore", (req, res) => {
+    const v = getVersion(id(req)); if (!v) return res.status(404).json({ message: "Version not found" });
+    try {
+      const out = restoreVersion(id(req));
+      const today = localToday();
+      for (const x of storage.listReservations(v.location_id)) if (x.date >= today) syncCampaign(x.id);
+      res.json(out);
+    } catch (e: any) { res.status(500).json({ message: e?.message || "Restore failed" }); }
+  });
+
+  // ---------- Ask SeatSmart (assistant) ----------
+  const selfApi = (req: Request): ApiCall => async (method, path, body) => {
+    const port = Number(process.env.PORT || 5000);
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (req.headers.authorization) headers.Authorization = String(req.headers.authorization);
+    if (req.headers.cookie) headers.Cookie = String(req.headers.cookie);
+    const r = await fetch(`http://127.0.0.1:${port}${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+    const json = await r.json().catch(() => ({}));
+    return { ok: r.ok, status: r.status, json };
+  };
+  app.post("/api/locations/:id/assistant", async (req, res) => {
+    const b = z.object({
+      messages: z.array(z.object({ role: z.enum(["user", "assistant"]), content: z.string().max(8000) })).min(1).max(40),
+      date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).default(localToday()), page: z.string().max(40).default(""),
+    }).safeParse(req.body);
+    if (!b.success) return res.status(400).json({ message: "Type a request" });
+    try { res.json(await runAssistant({ locationId: id(req), ...b.data, api: selfApi(req) })); }
+    catch (e: any) { res.status(e?.status || 500).json({ message: e?.message || "Assistant failed" }); }
+  });
+  app.post("/api/locations/:id/assistant/apply", async (req, res) => {
+    const b = z.object({ request: z.string().max(400).default(""), actions: z.array(z.object({ id: z.string(), tool: z.string(), args: z.any(), summary: z.string() })).min(1).max(40) }).safeParse(req.body);
+    if (!b.success) return res.status(400).json({ message: "Nothing to apply" });
+    const v = saveVersion(id(req), `Before assistant: ${b.data.request || b.data.actions[0].summary}`.slice(0, 160), "system");
+    const versionId = v?.id ?? listVersions(id(req))[0]?.id ?? null;
+    const results = await applyActions(id(req), b.data.actions, selfApi(req));
+    res.json({ results, versionId });
+  });
+
+  // ---------- pacing by date ----------
+  app.get("/api/locations/:id/pacing-overrides", (req, res) => res.json(storage.listPacingOverrides(id(req))));
+  app.put("/api/locations/:id/pacing-overrides/:date", (req, res) => {
+    const b = z.object({ pacingCovers: z.coerce.number().int().min(1).max(500), note: z.string().max(80).default("") }).safeParse(req.body);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(req.params.date)) return res.status(400).json({ message: "Bad date" });
+    if (!b.success) return res.status(400).json({ message: "Enter covers per 15 minutes (1–500)" });
+    storage.setPacingOverride(id(req), req.params.date, b.data.pacingCovers, b.data.note);
+    res.json(storage.getPacingOverride(id(req), req.params.date));
+  });
+  app.delete("/api/locations/:id/pacing-overrides/:date", (req, res) => { storage.deletePacingOverride(id(req), req.params.date); res.json({ ok: true }); });
 
   // ---------- locations ----------
   app.get("/api/locations", (_req, res) => {
@@ -356,7 +450,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ message: "Bad date" });
     const L = id(req);
     ensureRooms(L);
-    res.json(analyzePacing(date, storage.listTables(L), storage.listRooms(L), storage.listReservations(L, date), storage.getRules(L), storage.listBlocks(L, date)));
+    res.json(analyzePacing(date, storage.listTables(L), storage.listRooms(L), storage.listReservations(L, date), storage.rulesFor(L, date), storage.listBlocks(L, date)));
   });
   // dates with bookings, for quick navigation
   app.get("/api/locations/:id/booked-dates", (req, res) => {

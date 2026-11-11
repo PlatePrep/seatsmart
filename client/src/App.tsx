@@ -19,6 +19,7 @@ import Calls from "@/pages/calls";
 import Rules from "@/pages/rules";
 import SettingsPage from "@/pages/settings";
 import Locations from "@/pages/locations";
+import Versions from "@/pages/versions";
 import Portal from "@/pages/portal";
 import { AuthGate } from "@/components/auth-gate";
 
@@ -40,6 +41,7 @@ function HostApp() {
           <Route path="/rules" component={Rules} />
           <Route path="/settings" component={SettingsPage} />
           <Route path="/locations" component={Locations} />
+          <Route path="/versions" component={Versions} />
           <Route component={NotFound} />
         </Switch>
       </Shell>

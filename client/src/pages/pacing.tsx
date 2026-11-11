@@ -8,7 +8,9 @@ import { PageHeader, Pill, Empty } from "@/components/common";
 import { BlocksManager } from "@/components/blocks-manager";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useMutation } from "@tanstack/react-query";
+import { errMsg, invalidateLocation, send } from "@/lib/api";
 import { ChevronLeft, ChevronRight, Copy } from "lucide-react";
 
 type Risk = { level: "high" | "medium" | "low"; time: string; title: string; detail: string };
@@ -27,6 +29,32 @@ function Kpi({ label, value, sub, testId }: { label: string; value: string; sub?
       <div className="text-xs text-muted-foreground">{label}</div>
       <div className="mt-0.5 text-xl font-semibold tabular-nums">{value}</div>
       {sub && <div className="truncate text-xs text-muted-foreground">{sub}</div>}
+    </div>
+  );
+}
+
+function DayPace({ locationId, date }: { locationId: number; date: string }) {
+  const { toast } = useToast();
+  const { data: rules } = useQuery<any>({ queryKey: ["/api/locations", locationId, "rules"], enabled: !!locationId });
+  const { data: list = [] } = useQuery<{ date: string; pacingCovers: number; note: string }[]>({ queryKey: ["/api/locations", locationId, "pacing-overrides"], enabled: !!locationId });
+  const o = list.find((x) => x.date === date);
+  const def = rules?.pacingCovers ?? 30;
+  const [v, setV] = useState<number | "">("");
+  useEffect(() => setV(o ? o.pacingCovers : def), [o?.pacingCovers, def, date]);
+  const save = useMutation({
+    mutationFn: () => send("PUT", `/api/locations/${locationId}/pacing-overrides/${date}`, { pacingCovers: v, note: o?.note || "" }),
+    onSuccess: () => { invalidateLocation(locationId); toast({ title: `Pace cap for ${dateLabel(date)}: ${v} covers / 15 min` }); },
+    onError: (e) => toast({ title: "Couldn't save", description: errMsg(e), variant: "destructive" }),
+  });
+  const clear = useMutation({ mutationFn: () => send("DELETE", `/api/locations/${locationId}/pacing-overrides/${date}`), onSuccess: () => invalidateLocation(locationId) });
+  return (
+    <div className="flex flex-wrap items-center gap-2 rounded-md border bg-card px-3 py-1.5 text-sm" data-testid="day-pace">
+      <span className="text-muted-foreground">Pace cap this day</span>
+      <Input type="number" min={1} value={v} onChange={(e) => setV(e.target.value === "" ? "" : Number(e.target.value))} className="h-8 w-20" data-testid="input-day-pace" />
+      <span className="text-muted-foreground">covers / 15 min</span>
+      {o ? <Pill t="teal">Custom for this date</Pill> : <Pill>Default</Pill>}
+      {v !== "" && v !== (o ? o.pacingCovers : def) && <Button size="sm" className="h-8" onClick={() => save.mutate()} disabled={save.isPending} data-testid="button-save-day-pace">Set for this date</Button>}
+      {o && <Button size="sm" variant="ghost" className="h-8" onClick={() => clear.mutate()} data-testid="button-clear-day-pace">Use default ({def})</Button>}
     </div>
   );
 }
@@ -63,6 +91,7 @@ export default function PacingPage() {
         <Input type="date" value={date} onChange={(e) => e.target.value && setDate(e.target.value)} className="w-44" data-testid="input-date" />
         <Button variant="outline" size="icon" onClick={() => setDate(addDays(date, 1))} aria-label="Next day" data-testid="button-next-day"><ChevronRight className="h-4 w-4" /></Button>
         <span className="ml-2 text-sm text-muted-foreground">{dateLabel(date, { weekday: "long", month: "long", day: "numeric" })}</span>
+        {locationId && <div className="ml-auto"><DayPace locationId={locationId} date={date} /></div>}
       </div>
       {upcoming.length > 0 && (
         <div className="mb-4 flex flex-wrap gap-1.5" data-testid="list-booked-dates">

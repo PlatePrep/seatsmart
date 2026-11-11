@@ -1,10 +1,11 @@
 import type { ReactNode } from "react";
 import { Link, useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
-import { LogOut, LayoutDashboard, CalendarDays, Armchair, Map, ShieldCheck, PhoneCall, SlidersHorizontal, Settings, Building2, TrendingUp, LayoutGrid, Users } from "lucide-react";
+import { LogOut, LayoutDashboard, CalendarDays, Armchair, Map, ShieldCheck, PhoneCall, SlidersHorizontal, Settings, Building2, TrendingUp, LayoutGrid, Users, History } from "lucide-react";
 import { useApp } from "@/lib/app-context";
 import { useAuth } from "@/components/auth-gate";
 import { cn } from "@/lib/utils";
+import { Assistant } from "@/components/assistant";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 const NAV = [
@@ -20,6 +21,7 @@ const NAV = [
   { href: "/rules", label: "Rules", icon: SlidersHorizontal },
   { href: "/settings", label: "Settings", icon: Settings },
   { href: "/locations", label: "Locations", icon: Building2 },
+  { href: "/versions", label: "Version history", icon: History },
 ];
 
 function Mark() {
@@ -89,7 +91,8 @@ export function Shell({ children }: { children: ReactNode }) {
           </div>
           <nav className="flex gap-1 overflow-x-auto px-3 pb-2">{NAV.map((n) => item(n, true))}</nav>
         </header>
-        <main className="mx-auto max-w-[1240px] px-4 py-6 md:px-8 md:py-8">{children}</main>
+        <main className="mx-auto max-w-[1240px] px-4 py-6 pb-24 md:px-8 md:py-8 md:pb-24">{children}</main>
+        <Assistant />
       </div>
     </div>
   );

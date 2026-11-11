@@ -10,6 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Plus, Trash2 } from "lucide-react";
+import { PacingByDate } from "@/components/pacing-by-date";
 
 function Num({ label, value, onChange, suffix, id }: { label: string; value: number; onChange: (n: number) => void; suffix?: string; id: string }) {
   return (
@@ -71,6 +72,7 @@ export default function Rules() {
             <Switch checked={!!f.useBallroom} onCheckedChange={set("useBallroom")} />Use ballroom as overflow (after inside, before patio)
           </label>
           <p className="mt-3 text-xs text-muted-foreground">Blank start/last seating = use first and last booking. Openings never break the pace cap or blocked tables.</p>
+          {locationId && <div className="mt-4 border-t pt-4"><PacingByDate locationId={locationId} defaultCovers={data?.pacingCovers ?? f.pacingCovers} /></div>}
         </Section>
         <Section title="Big parties">
           <div className="grid grid-cols-2 gap-3">
