@@ -51,7 +51,9 @@ export function analyzePacing(date: string, tables: DiningTable[], rooms: Room[]
   }
   for (const u of std.unseated) {
     const x = byId.get(u.reservationId)!;
-    risks.push({ level: "high", time: minToLabel(toMin(x.time)), title: `${x.guestName} (${x.partySize}) has no table`, detail: `${u.reason}. ${u.suggestion || ""}`.trim() });
+    if (u.holdTableIds?.length) risks.push({ level: "medium", time: minToLabel(toMin(x.time)), title: `${x.guestName} (${x.partySize}) needs a custom set-up`,
+      detail: `No standard table or merge is free for ${x.partySize} at ${minToLabel(toMin(x.time))}. ${(u.suggestion || "").replace(/^Custom set-up: p/, "P")} Those tables are held for this party.` });
+    else risks.push({ level: "high", time: minToLabel(toMin(x.time)), title: `${x.guestName} (${x.partySize}) has no table`, detail: `${u.reason}. ${u.suggestion || ""}`.trim() });
   }
   // pacing: per-slot and peak 30 minutes
   const cap = r.pacingCovers;
