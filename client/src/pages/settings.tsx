@@ -34,6 +34,18 @@ export default function SettingsPage() {
     onSuccess: (x: any) => toast({ title: x.ok ? "Connections OK" : "Check connections", description: x.message, variant: x.ok ? undefined : "destructive" }),
     onError: (e) => toast({ title: "Test failed", description: errMsg(e), variant: "destructive" }),
   });
+  const [testTo, setTestTo] = useState("");
+  const tool = (path: string, body?: any) => send<any>("POST", `/api/locations/${locationId}/${path}`, body);
+  const setup = useMutation({
+    mutationFn: async () => { await send("PATCH", `/api/locations/${locationId}/settings`, f); return tool("synthflow/setup"); },
+    onSuccess: (x: any) => {
+      invalidateLocation(locationId);
+      toast({ title: x.created.length ? "Call agents created in Synthflow" : "Call agents updated", description: [!x.phone && "Add your Twilio From number, then run this again to attach it.", !x.webhook && "Call results come back once the public app URL is set."].filter(Boolean).join(" ") || "Ready for a test call." });
+    },
+    onError: (e) => toast({ title: "Synthflow setup failed", description: errMsg(e), variant: "destructive" }),
+  });
+  const testSms = useMutation({ mutationFn: () => tool("test/sms", { to: testTo }), onSuccess: (x) => toast({ title: x.message }), onError: (e) => toast({ title: "Text failed", description: errMsg(e), variant: "destructive" }) });
+  const testCall = useMutation({ mutationFn: (agent: string) => tool("test/call", { to: testTo, agent }), onSuccess: (x) => toast({ title: x.message }), onError: (e) => toast({ title: "Call failed", description: errMsg(e), variant: "destructive" }) });
   const [pw, setPw] = useState({ current: "", next: "", confirm: "" });
   const changePw = useMutation({
     mutationFn: () => send<{ token: string }>("POST", "/api/auth/password", { current: pw.current, next: pw.next }),
@@ -62,6 +74,23 @@ export default function SettingsPage() {
             <p className="text-sm text-muted-foreground">{f.mockMode ? "Texts, emails, calls and charges are simulated and logged. Guests use a demo card form." : "Real texts, emails and calls go out. Cards are saved through Stripe Checkout."}</p>
           </div>
         </section>
+        <Section title="AI calls & texts setup">
+          <ol className="mb-3 list-decimal space-y-1 pl-5 text-sm text-muted-foreground">
+            <li>Paste your Twilio Account SID, Auth token and From number (+1…) below. The same number is used for texts and calls.</li>
+            <li>In Synthflow, connect that Twilio account (Settings → Integrations → Twilio), then paste your Synthflow API key below.</li>
+            <li>Click <span className="font-medium text-foreground">Create call agents</span>. SeatSmart builds the card &amp; confirmation agent and the move-inside agent for you.</li>
+            <li>Send a test text and a test call to your own phone, then turn off Demo mode.</li>
+          </ol>
+          <div className="flex flex-wrap items-end gap-2">
+            <Button onClick={() => setup.mutate()} disabled={setup.isPending} data-testid="button-setup-agents">{setup.isPending ? "Working…" : f.synthflowCardAgentId ? "Update call agents" : "Create call agents"}</Button>
+            <div className="ml-auto flex flex-wrap items-end gap-2">
+              <div><Label htmlFor="test-to">Your cell for tests</Label><Input id="test-to" value={testTo} onChange={(e) => setTestTo(e.target.value)} placeholder="(941) 555-0123" className="mt-1 w-44" data-testid="input-test-phone" /></div>
+              <Button variant="outline" onClick={() => testSms.mutate()} disabled={!testTo || testSms.isPending} data-testid="button-test-sms">Test text</Button>
+              <Button variant="outline" onClick={() => testCall.mutate("card")} disabled={!testTo || testCall.isPending || !f.synthflowCardAgentId} data-testid="button-test-call">Test call</Button>
+            </div>
+          </div>
+          <p className="mt-2 text-xs text-muted-foreground">Tests send for real even in Demo mode. The test call plays a sample party of 12 on Nov 26 at 6:00 PM.</p>
+        </Section>
         <Section title="Restaurant">
           <div className="grid gap-3 md:grid-cols-2">
             <div><Label>Name in guest messages</Label><Input value={f.restaurantName} onChange={(e) => setF({ ...f, restaurantName: e.target.value })} data-testid="input-restaurant-name" /></div>

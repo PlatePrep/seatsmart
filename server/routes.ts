@@ -3,7 +3,7 @@ import type { Server } from "node:http";
 import { z } from "zod";
 import { storage } from "./storage";
 import { reservationInputSchema, insertLocationSchema } from "@shared/schema";
-import { localToUtc, localToday } from "@shared/time";
+import { localToUtc, localToday, timeLabel } from "@shared/time";
 import { generatePlan, walkInAvailability } from "./seating";
 import { analyzePacing } from "./pacing";
 import {
@@ -11,10 +11,11 @@ import {
   setClientOrigin, portalLink, messageFor, voiceScript, isActive,
 } from "./outreach";
 import {
-  createSetupCheckout, getSetupIntent, chargeOffSession, verifyStripeSignature, placeCall,
+  createSetupCheckout, getSetupIntent, chargeOffSession, verifyStripeSignature, placeCall, sendSms,
 } from "./providers";
 import { seedIfEmpty } from "./seed";
 import { detectTables } from "./vision";
+import { setupAgents } from "./synthflow-setup";
 import { toMin } from "@shared/time";
 
 const id = (req: Request, k = "id") => Number(req.params[k]);
@@ -276,6 +277,38 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     res.json({ ok: checks.every((c) => c.endsWith("OK")) && checks.length > 0, message: checks.length ? checks.join(" · ") : "No keys saved yet." });
   });
 
+  // ---------- AI calls + SMS setup ----------
+  const e164 = (v: string) => { const d = v.replace(/[^\d+]/g, ""); return d.startsWith("+") ? d : d.length === 10 ? `+1${d}` : d.length === 11 && d.startsWith("1") ? `+${d}` : ""; };
+  app.post("/api/locations/:id/synthflow/setup", async (req, res) => {
+    const L = id(req); const s = storage.getSettings(L);
+    const base = (s.publicBaseUrl || "").replace(/#.*$/, "").replace(/\/$/, "");
+    try {
+      const r = await setupAgents(s, base ? `${base}/api/webhooks/synthflow` : "");
+      storage.updateSettings(L, { synthflowCardAgentId: r.cardId, synthflowAgentId: r.offerId });
+      res.json({ ...r, webhook: !!base, phone: !!s.twilioFrom });
+    } catch (e: any) { res.status(400).json({ message: e.message }); }
+  });
+  app.post("/api/locations/:id/test/sms", async (req, res) => {
+    const L = id(req); const s = storage.getSettings(L); const to = e164(String(req.body?.to || ""));
+    if (!to) return res.status(400).json({ message: "Enter a valid phone number" });
+    const name = s.restaurantName || storage.getLocation(L)?.name || "SeatSmart";
+    const x = await sendSms({ ...s, mockMode: false }, to, `${name}: this is a SeatSmart test text. Texts for large-party card holds are working. Reply STOP to opt out.`);
+    x.ok ? res.json({ ok: true, message: `Text sent to ${to}` }) : res.status(400).json({ message: x.detail });
+  });
+  app.post("/api/locations/:id/test/call", async (req, res) => {
+    const L = id(req); const s = storage.getSettings(L); const to = e164(String(req.body?.to || ""));
+    if (!to) return res.status(400).json({ message: "Enter a valid phone number" });
+    const agent = req.body?.agent === "offer" ? s.synthflowAgentId : s.synthflowCardAgentId;
+    if (!agent) return res.status(400).json({ message: "Create the call agents first" });
+    const r = storage.getRules(L);
+    const x = await placeCall({ ...s, mockMode: false }, agent, to, "Test Guest", {
+      guest_name: "Test Guest", party_size: "12", reservation_date: "Thursday, November 26", reservation_time: "6:00 PM",
+      restaurant_name: s.restaurantName || storage.getLocation(L)?.name || "the restaurant", card_link: "the link in your texts",
+      no_show_policy: `$${(r.noShowFeeCents / 100).toFixed(0)} per guest if the party doesn't show`, offer: "A table just opened inside. Would you like to move inside?",
+    });
+    x.ok ? res.json({ ok: true, message: `Calling ${to} now` }) : res.status(400).json({ message: x.detail });
+  });
+
   // ---------- pacing + openings ----------
   app.get("/api/locations/:id/pacing", (req, res) => {
     const date = String(req.query.date || localToday());
@@ -389,7 +422,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     const r = storage.getReservation(id(req));
     if (!r) return res.status(404).json({ message: "Not found" });
     const s = storage.getSettings(r.locationId);
-    const x = await placeCall(s, s.synthflowAgentId, r.phone, r.guestName, { guest_name: r.guestName, party_size: String(r.partySize), offer: "A table inside opened up. Would you like to move inside?" });
+    const x = await placeCall(s, s.synthflowAgentId, r.phone, r.guestName, { guest_name: r.guestName, party_size: String(r.partySize), reservation_time: timeLabel(r.time), restaurant_name: s.restaurantName || storage.getLocation(r.locationId)?.name || "the restaurant", offer: "A table inside opened up. Would you like to move inside?" });
     const call = storage.createCall({
       locationId: r.locationId, reservationId: r.id, intent: "offer_inside", status: x.ok ? (s.mockMode ? "completed" : "queued") : "failed",
       outcome: x.ok && s.mockMode ? "accepted_inside" : x.ok ? "" : x.detail,

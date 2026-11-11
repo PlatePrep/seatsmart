@@ -28,7 +28,7 @@ export function messageFor(channel: string, r: Reservation): { sms: string; subj
   const phone = loc?.phone || "us";
   const base = `Hi ${first}, confirming your reservation for ${r.partySize} at ${name} on ${when}. ` +
     `If you have not already, please click here to add a credit card or to change your reservation before it's too late: ${link}. ` +
-    `Reply CONFIRM to confirm, or call ${phone}.`;
+    `Reply CONFIRM to confirm, or call ${phone}. Reply STOP to opt out.`;
   if (channel === "sms_final") {
     const sms = `${name}: we still don't have a card on file for your party of ${r.partySize} tonight at ${timeLabel(r.time)}. ` +
       `Card not received — your table may be released. Add it here: ${link}`;
@@ -133,9 +133,12 @@ async function deliver(step: CampaignStep, r: Reservation): Promise<{ ok: boolea
   }
   if (step.channel === "voice") {
     const script = voiceScript(r);
+    const rules = storage.getRules(r.locationId);
     const x = await placeCall(s, s.synthflowCardAgentId || s.synthflowAgentId, r.phone, r.guestName, {
       guest_name: r.guestName, party_size: String(r.partySize), reservation_time: timeLabel(r.time),
-      reservation_date: r.date, card_link: portalLink(r), script,
+      reservation_date: dateLabel(r.date, { weekday: "long", month: "long", day: "numeric" }), card_link: portalLink(r), script,
+      restaurant_name: s.restaurantName || storage.getLocation(r.locationId)?.name || "the restaurant",
+      no_show_policy: `$${(rules.noShowFeeCents / 100).toFixed(0)} per guest if the party doesn't show`,
     });
     const call = storage.createCall({
       locationId: r.locationId, reservationId: r.id, intent: "card_capture", status: x.ok ? (s.mockMode ? "completed" : "queued") : "failed",
@@ -145,7 +148,7 @@ async function deliver(step: CampaignStep, r: Reservation): Promise<{ ok: boolea
     });
     storage.addEvent(r.id, "call_out", "voice", x.ok ? `Card-capture call #${call.id}${s.mockMode ? " (demo): guest asked for the link" : " queued"}` : `FAILED: ${x.detail}`);
     results.push(`Call ${x.ok ? "placed" : "failed: " + x.detail}`); ok = ok && x.ok; pid = x.providerId;
-    if (x.ok && s.mockMode) {
+    if (x.ok) { // the agent tells the guest a link is on its way, so send it with the call
       const y = await sendSms(s, r.phone, `${messageFor("sms", r).sms}`);
       storage.addEvent(r.id, "sms_out", "sms", y.ok ? `Link text after call: ${portalLink(r)}` : `FAILED: ${y.detail}`);
     }
