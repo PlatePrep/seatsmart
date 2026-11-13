@@ -24,6 +24,8 @@ app.use(
   }),
 );
 
+app.set("case sensitive routing", true);
+app.set("trust proxy", 1);
 app.use(express.urlencoded({ extended: false }));
 
 export function log(message: string, source = "express") {
@@ -52,7 +54,7 @@ app.use((req, res, next) => {
     const duration = Date.now() - start;
     if (path.startsWith("/api")) {
       let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
-      if (capturedJsonResponse && !path.startsWith("/api/auth")) {
+      if (capturedJsonResponse && process.env.NODE_ENV !== "production" && !path.startsWith("/api/auth")) {
         logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
       }
 

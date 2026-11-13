@@ -14,7 +14,7 @@ const get = (k: string) => (rawDb.prepare("SELECT value FROM app_meta WHERE key 
 const set = (k: string, v: string) => rawDb.prepare("INSERT INTO app_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(k, v);
 
 const SESSION_DAYS = 14;
-const PUBLIC = [/^\/api\/auth\/(login|status)$/, /^\/api\/portal\//, /^\/api\/webhooks\//];
+const PUBLIC = [/^\/api\/auth\/(login|status)\/?$/i, /^\/api\/portal\//i, /^\/api\/webhooks\//i];
 
 function hash(pw: string, salt = crypto.randomBytes(16).toString("hex")) {
   return `${salt}:${crypto.scryptSync(pw, salt, 64).toString("hex")}`;
@@ -69,7 +69,8 @@ export function registerAuth(app: Express) {
   initAuth();
 
   app.use((req: Request, res: Response, next: NextFunction) => {
-    if (!req.path.startsWith("/api/") || PUBLIC.some((r) => r.test(req.path))) return next();
+    const p = req.path.toLowerCase();
+    if (!p.startsWith("/api/") || PUBLIC.some((r) => r.test(p))) return next();
     if (valid(tokenFrom(req))) return next();
     res.status(401).json({ message: "Sign in required" });
   });
@@ -87,12 +88,12 @@ export function registerAuth(app: Express) {
     }
     attempts.delete(ip);
     const token = sign(Date.now() + SESSION_DAYS * 86400_000);
-    res.setHeader("Set-Cookie", `${COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=None; Secure; Max-Age=${SESSION_DAYS * 86400}`);
+    res.setHeader("Set-Cookie", `${COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Secure; Max-Age=${SESSION_DAYS * 86400}`);
     res.json({ token });
   });
 
   app.post("/api/auth/logout", (_req, res) => {
-    res.setHeader("Set-Cookie", `${COOKIE}=; Path=/; HttpOnly; SameSite=None; Secure; Max-Age=0`);
+    res.setHeader("Set-Cookie", `${COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Secure; Max-Age=0`);
     res.json({ ok: true });
   });
 
@@ -103,7 +104,7 @@ export function registerAuth(app: Express) {
     if (next.length < 8) return res.status(400).json({ message: "Use at least 8 characters" });
     setPassword(next);
     const token = sign(Date.now() + SESSION_DAYS * 86400_000);
-    res.setHeader("Set-Cookie", `${COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=None; Secure; Max-Age=${SESSION_DAYS * 86400}`);
+    res.setHeader("Set-Cookie", `${COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Secure; Max-Age=${SESSION_DAYS * 86400}`);
     res.json({ token });
   });
 }

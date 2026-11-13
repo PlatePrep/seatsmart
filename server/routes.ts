@@ -622,7 +622,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     const s = storage.getSettings(r.locationId);
     if (s.mockMode) { storage.updateReservation(r.id, { cardStatus: r.cardStatus === "on_file" ? "on_file" : "pending" }); return res.json({ mode: "mock" }); }
     if (!s.stripeSecretKey) return res.status(400).json({ message: "Card capture isn't set up yet. Please call the restaurant." });
-    const back = String(req.body?.returnUrl || portalLink(r));
+    const back = safeReturn(String(req.body?.returnUrl || ""), portalLink(r), String(req.headers.host || ""));
     try {
       const out = await createSetupCheckout(s, {
         email: r.email, name: r.guestName, reservationId: r.id,
@@ -670,7 +670,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     if (!r) return res.status(404).json({ message: "This link is not valid." });
     const s = storage.getSettings(r.locationId);
     const sid = String(req.body?.sessionId || "");
-    if (!sid || s.mockMode || !s.stripeSecretKey) return res.json(portalView(r));
+    if (!/^cs_[A-Za-z0-9_]+$/.test(sid) || s.mockMode || !s.stripeSecretKey) return res.json(portalView(r));
     try {
       const sess = await fetch(`https://api.stripe.com/v1/checkout/sessions/${sid}`, { headers: { Authorization: `Bearer ${s.stripeSecretKey}` } }).then((x) => x.json());
       if (sess?.metadata?.reservation_id === String(r.id) && sess.setup_intent) await applySetupIntent(r.id, s, sess.setup_intent);
@@ -756,4 +756,16 @@ function normDate(d: string): string {
   if (!m) return "";
   const y = m[3].length === 2 ? `20${m[3]}` : m[3];
   return `${y}-${m[1].padStart(2, "0")}-${m[2].padStart(2, "0")}`;
+}
+
+/** Only send guests back to our own pages after Stripe (blocks open redirects). */
+function safeReturn(url: string, fallback: string, host: string): string {
+  try {
+    const u = new URL(url);
+    const ok = new Set([host.toLowerCase()]);
+    try { ok.add(new URL(fallback).host.toLowerCase()); } catch {}
+    const h = u.host.toLowerCase();
+    if (u.protocol === "https:" && (ok.has(h) || h.endsWith(".pplx.app") || h === "www.perplexity.ai")) return url;
+  } catch {}
+  return fallback;
 }
