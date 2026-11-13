@@ -52,11 +52,14 @@ function valid(token: string | undefined) {
   const want = sign(Number(exp)).split(".")[1];
   return mac.length === want.length && crypto.timingSafeEqual(Buffer.from(mac), Buffer.from(want));
 }
+// __Host- prefix: required on pplx.app hosting, and it pins the cookie to this exact host
+const COOKIE = "__Host-ss_session";
 function tokenFrom(req: Request) {
   const h = req.headers.authorization;
   if (h?.startsWith("Bearer ")) return h.slice(7);
-  const c = req.headers.cookie?.split(";").map((s) => s.trim()).find((s) => s.startsWith("ss_session="));
-  return c ? decodeURIComponent(c.slice(11)) : undefined;
+  const parts = req.headers.cookie?.split(";").map((s) => s.trim()) || [];
+  const c = parts.find((s) => s.startsWith(COOKIE + "=")) || parts.find((s) => s.startsWith("ss_session="));
+  return c ? decodeURIComponent(c.slice(c.indexOf("=") + 1)) : undefined;
 }
 
 // simple per-IP throttle on login attempts
@@ -84,12 +87,12 @@ export function registerAuth(app: Express) {
     }
     attempts.delete(ip);
     const token = sign(Date.now() + SESSION_DAYS * 86400_000);
-    res.setHeader("Set-Cookie", `ss_session=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=None; Secure; Max-Age=${SESSION_DAYS * 86400}`);
+    res.setHeader("Set-Cookie", `${COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=None; Secure; Max-Age=${SESSION_DAYS * 86400}`);
     res.json({ token });
   });
 
   app.post("/api/auth/logout", (_req, res) => {
-    res.setHeader("Set-Cookie", "ss_session=; Path=/; HttpOnly; SameSite=None; Secure; Max-Age=0");
+    res.setHeader("Set-Cookie", `${COOKIE}=; Path=/; HttpOnly; SameSite=None; Secure; Max-Age=0`);
     res.json({ ok: true });
   });
 
@@ -100,7 +103,7 @@ export function registerAuth(app: Express) {
     if (next.length < 8) return res.status(400).json({ message: "Use at least 8 characters" });
     setPassword(next);
     const token = sign(Date.now() + SESSION_DAYS * 86400_000);
-    res.setHeader("Set-Cookie", `ss_session=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=None; Secure; Max-Age=${SESSION_DAYS * 86400}`);
+    res.setHeader("Set-Cookie", `${COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=None; Secure; Max-Age=${SESSION_DAYS * 86400}`);
     res.json({ token });
   });
 }
