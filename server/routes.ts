@@ -416,7 +416,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   const e164 = (v: string) => { const d = v.replace(/[^\d+]/g, ""); return d.startsWith("+") ? d : d.length === 10 ? `+1${d}` : d.length === 11 && d.startsWith("1") ? `+${d}` : ""; };
   app.post("/api/locations/:id/synthflow/setup", async (req, res) => {
     const L = id(req); const s = storage.getSettings(L);
-    const base = (s.publicBaseUrl || "").replace(/#.*$/, "").replace(/\/$/, "");
+    const wb = String(req.body?.webhookBase || "");
+    const base = (/^https:\/\/[a-z0-9.-]+(\/port\/\d+)?$/i.test(wb) ? wb : (s.publicBaseUrl || "")).replace(/#.*$/, "").replace(/\/$/, "");
     try {
       const r = await setupAgents(s, base ? `${base}/api/webhooks/synthflow` : "");
       storage.updateSettings(L, { synthflowCardAgentId: r.cardId, synthflowAgentId: r.offerId });

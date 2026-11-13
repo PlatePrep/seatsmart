@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useApp } from "@/lib/app-context";
 import { errMsg, invalidateLocation, send } from "@/lib/api";
-import { setAuthToken } from "@/lib/queryClient";
+import { setAuthToken, backendBase } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { PageHeader, Section, Pill } from "@/components/common";
 import { Button } from "@/components/ui/button";
@@ -37,7 +37,7 @@ export default function SettingsPage() {
   const [testTo, setTestTo] = useState("");
   const tool = (path: string, body?: any) => send<any>("POST", `/api/locations/${locationId}/${path}`, body);
   const setup = useMutation({
-    mutationFn: async () => { await send("PATCH", `/api/locations/${locationId}/settings`, f); return tool("synthflow/setup"); },
+    mutationFn: async () => { await send("PATCH", `/api/locations/${locationId}/settings`, f); return tool("synthflow/setup", { webhookBase: backendBase() }); },
     onSuccess: (x: any) => {
       invalidateLocation(locationId);
       toast({ title: x.created.length ? "Call agents created in Synthflow" : "Call agents updated", description: [!x.phone && "Add your Twilio From number, then run this again to attach it.", !x.webhook && "Call results come back once the public app URL is set."].filter(Boolean).join(" ") || "Ready for a test call." });
@@ -53,7 +53,7 @@ export default function SettingsPage() {
     onError: (e) => toast({ title: "Couldn't change password", description: errMsg(e), variant: "destructive" }),
   });
   if (!f) return <div className="h-60 animate-pulse rounded-lg bg-muted" />;
-  const base = (f.publicBaseUrl || window.location.origin).replace(/\/$/, "");
+  const base = backendBase();
   const hooks = [
     ["Stripe webhook (checkout.session.completed)", `${base}/api/webhooks/stripe/${locationId}`],
     ["Twilio incoming SMS", `${base}/api/webhooks/sms`],

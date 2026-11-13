@@ -4,6 +4,9 @@ const API_BASE = "__PORT_5000__".startsWith("__") ? "" : "__PORT_5000__";
 
 // Staff session token, kept in memory only (sandboxed iframes block storage).
 // The HttpOnly cookie set at login covers page reloads where cookies are allowed.
+// Absolute backend URL for webhooks (POSTs must hit the backend directly, not a redirecting domain).
+export function backendBase() { return new URL(API_BASE || "/", window.location.href).href.replace(/\/$/, ""); }
+
 let authToken = "";
 export function setAuthToken(t: string) { authToken = t; }
 const authHeaders = (): Record<string, string> => (authToken ? { Authorization: `Bearer ${authToken}` } : {});
